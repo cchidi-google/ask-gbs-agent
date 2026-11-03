@@ -1,0 +1,44 @@
+name: Ask GBS AgentOps CI & Golden Dataset Evaluation
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  agentops-quality-gate:
+    name: Lint, 95-Pt Rubric Tests & Golden Dataset Eval
+    runs-on: ubuntu-latest
+
+    env:
+      GOOGLE_CLOUD_PROJECT: aecom-demo-uc1
+      GOOGLE_CLOUD_LOCATION: us-central1
+      ENABLE_CLOUD_LOGGING: "false"
+      ENABLE_CLOUD_TRACE: "false"
+      ENABLE_CLOUD_DLP: "false"
+      ENABLE_SECRET_MANAGER: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Ruff static analysis
+        run: ruff check ask_gbs_agent tests eval main.py deploy_agent_engine.py
+
+      - name: Run Pytest suite (A2UI v0.9, Golden Dataset & 19 Rubric Criteria)
+        run: pytest -v
+
+      - name: Execute Golden Dataset Evaluation Harness
+        run: python eval/run_adk_evaluation.py
