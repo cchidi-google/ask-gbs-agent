@@ -1,8 +1,10 @@
-"""Validates every A2UI v0.9 surface against all 10 Gemini Enterprise composite catalog rules."""
+"""Validates every A2UI v0.9 surface against strict Gemini Enterprise composite catalog rules."""
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import re
 from typing import Any
 
@@ -24,23 +26,150 @@ from ask_gbs_agent.plugins.a2ui_canvas_plugin import (
 )
 from ask_gbs_agent.tools.golden_catalog import find_golden_record
 
-ALLOWED_COMPONENTS = {
-    "Canvas",
-    "MaterialCard",
-    "MaterialColumn",
-    "MaterialRow",
-    "MaterialText",
-    "MaterialIcon",
-    "MaterialDivider",
-    "MaterialSelect",
-    "MaterialInput",
-    "MaterialButton",
-    "MaterialExpansionPanel",
-    "RichTable",
-    "Chart",
+# Exact per-component property allowlists derived from official
+# https://www.gstatic.com/vertexaisearch/a2ui/v0_9/gemini_enterprise_composite_catalog.json
+_COMMON_MATERIAL_KEYS = {"id", "accessibility", "weight", "style"}
+_COMMON_CUSTOM_KEYS = {"id", "accessibility", "weight"}
+
+STRICT_COMPONENT_ALLOWED_KEYS: dict[str, set[str]] = {
+    "Canvas": _COMMON_CUSTOM_KEYS
+    | {
+        "component",
+        "children",
+        "autoOpen",
+        "autoFullscreen",
+        "closePanel",
+        "cardTitle",
+        "cardDescription",
+        "cardIcon",
+    },
+    "MaterialCard": _COMMON_MATERIAL_KEYS
+    | {"component", "appearance", "align", "ariaLabel", "ariaLabelledby", "href", "children"},
+    "MaterialColumn": _COMMON_MATERIAL_KEYS | {"component", "children", "justify", "align"},
+    "MaterialRow": _COMMON_MATERIAL_KEYS | {"component", "children", "justify", "align"},
+    "MaterialText": _COMMON_MATERIAL_KEYS | {"component", "text", "usageHint"},
+    "MaterialIcon": _COMMON_MATERIAL_KEYS | {"component", "icon", "color", "tooltip"},
+    "MaterialDivider": _COMMON_MATERIAL_KEYS | {"component", "inset", "vertical"},
+    "MaterialSelect": _COMMON_MATERIAL_KEYS
+    | {
+        "component",
+        "label",
+        "placeholder",
+        "value",
+        "ariaLabel",
+        "ariaLabelledby",
+        "ariaDescribedby",
+        "disabled",
+        "options",
+        "checks",
+    },
+    "MaterialInput": _COMMON_MATERIAL_KEYS
+    | {
+        "component",
+        "label",
+        "placeholder",
+        "value",
+        "ariaLabelledby",
+        "ariaDescribedby",
+        "ariaLabel",
+        "disabled",
+        "name",
+        "readonly",
+        "type",
+        "validationRegexp",
+        "checks",
+    },
+    "MaterialButton": _COMMON_MATERIAL_KEYS
+    | {
+        "component",
+        "label",
+        "leadingIcon",
+        "trailingIcon",
+        "color",
+        "disabled",
+        "variant",
+        "action",
+        "tooltip",
+        "ariaLabel",
+        "appearance",
+        "disableRipple",
+        "extended",
+    },
+    "MaterialExpansionPanel": _COMMON_MATERIAL_KEYS
+    | {
+        "component",
+        "expanded",
+        "header",
+        "title",
+        "description",
+        "disabled",
+        "ariaLabel",
+        "ariaLabelledby",
+        "ariaDescribedby",
+        "children",
+    },
+    "MaterialTable": _COMMON_MATERIAL_KEYS
+    | {"component", "columns", "rows", "ariaLabel", "caption", "ariaLabelledby"},
+    "VegaChart": _COMMON_CUSTOM_KEYS | {"component", "spec", "height"},
 }
 
+ALLOWED_COMPONENTS = set(STRICT_COMPONENT_ALLOWED_KEYS.keys())
 WIRE_TAG_RE = re.compile(r"^<a2a_datapart_json>(.*)</a2a_datapart_json>$", re.DOTALL)
+
+
+def _validate_against_cached_official_schemas_if_present(messages: list[dict[str, Any]]) -> None:
+    """Runs Draft 2020-12 JSON Schema + strict unevaluatedProperties check if cached in /tmp."""
+    paths = ("/tmp/ge_catalog.json", "/tmp/common_types.json", "/tmp/server_to_client.json")
+    if not all(os.path.exists(p) for p in paths):
+        return
+
+    from jsonschema import Draft202012Validator
+    from referencing import Registry, Resource
+
+    with open("/tmp/ge_catalog.json", encoding="utf-8") as f:
+        strict_cat = copy.deepcopy(json.load(f))
+    with open("/tmp/common_types.json", encoding="utf-8") as f:
+        common_types = json.load(f)
+    with open("/tmp/server_to_client.json", encoding="utf-8") as f:
+        s2c = json.load(f)
+
+    for cschema in strict_cat["components"].values():
+        cschema["unevaluatedProperties"] = False
+
+    cat_id = strict_cat["$id"]
+
+    def _rewrite(obj: Any) -> None:
+        if isinstance(obj, dict):
+            if "$ref" in obj and obj["$ref"].startswith("catalog.json#"):
+                obj["$ref"] = cat_id + obj["$ref"][len("catalog.json") :]
+            for val in obj.values():
+                _rewrite(val)
+        elif isinstance(obj, list):
+            for val in obj:
+                _rewrite(val)
+
+    _rewrite(s2c)
+    _rewrite(common_types)
+
+    registry = (
+        Registry()
+        .with_resource(strict_cat["$id"], Resource.from_contents(strict_cat))
+        .with_resource(common_types["$id"], Resource.from_contents(common_types))
+        .with_resource(s2c["$id"], Resource.from_contents(s2c))
+    )
+    msg_validator = Draft202012Validator(s2c, registry=registry)
+    for msg in messages:
+        errs = list(msg_validator.iter_errors(msg))
+        assert not errs, f"Official schema error: {errs[0].message}"
+        if "updateComponents" in msg:
+            for comp in msg["updateComponents"]["components"]:
+                ctype = comp["component"]
+                comp_validator = Draft202012Validator(
+                    {"$ref": f"{cat_id}#/components/{ctype}"},
+                    registry=registry,
+                )
+                cerrs = list(comp_validator.iter_errors(comp))
+                assert not cerrs, f"Component {comp['id']} ({ctype}) failed: {cerrs[0].message}"
 
 
 def assert_ten_a2ui_catalog_rules(packaged: dict[str, Any], expected_root_type: str) -> None:
@@ -85,45 +214,67 @@ def assert_ten_a2ui_catalog_rules(packaged: dict[str, Any], expected_root_type: 
     root_comp = roots[0]
     assert root_comp["component"] == expected_root_type
 
-    # Rule 5: Allowed component types + Canvas `content` vs MaterialCard `child`
+    # Rule 5: Both Canvas and MaterialCard require `children: [...]` (never `child` or `content`)
     id_set = set(comp_ids)
-    if expected_root_type == "Canvas":
-        assert "content" in root_comp and root_comp["content"] in id_set
-    elif expected_root_type == "MaterialCard":
-        assert "child" in root_comp and root_comp["child"] in id_set
+    assert "children" in root_comp and isinstance(root_comp["children"], list)
+    assert len(root_comp["children"]) >= 1
+    assert "child" not in root_comp and "content" not in root_comp
 
-    # Rule 6, 7, 8, 9: Component-specific structural & graph integrity checks
+    # Rule 6, 7, 8, 9: Strict key allowlists, component graph integrity, table/chart/button checks
     for comp in components:
         ctype = comp["component"]
         assert ctype in ALLOWED_COMPONENTS, f"Unsupported A2UI component: {ctype}"
 
-        if "child" in comp:
-            assert comp["child"] in id_set, f"Dangling child ref {comp['child']}"
-            assert comp["child"] != comp["id"], "Self-referential cycle detected"
-        if "content" in comp and isinstance(comp["content"], str):
-            assert comp["content"] in id_set, f"Dangling content ref {comp['content']}"
+        unexpected_keys = set(comp.keys()) - STRICT_COMPONENT_ALLOWED_KEYS[ctype]
+        assert not unexpected_keys, (
+            f"Unrecognized key(s) on {ctype} ({comp['id']}): {sorted(unexpected_keys)}"
+        )
+
         if "children" in comp:
+            assert isinstance(comp["children"], list) and len(comp["children"]) >= 1
             for cid in comp["children"]:
                 assert cid in id_set, f"Dangling children ref {cid}"
-                assert cid != comp["id"]
+                assert cid != comp["id"], "Self-referential cycle detected"
 
-        # Rule 7: RichTable spec: {} and numeric floats
-        if ctype == "RichTable":
-            assert isinstance(comp.get("spec"), dict)
+        if ctype == "MaterialIcon":
+            assert isinstance(comp.get("icon"), str) and len(comp["icon"]) > 0
+
+        # Rule 7: MaterialTable columns (header + field) & string-valued rows; VegaChart DataBinding
+        if ctype == "MaterialTable":
+            cols = comp.get("columns", [])
             rows = comp.get("rows", [])
-            assert len(rows) >= 3
+            assert len(cols) >= 3 and len(rows) >= 3
+            for col in cols:
+                assert set(col.keys()) <= {"header", "field"}
+                assert "header" in col and "field" in col
             for row in rows:
-                assert isinstance(row["amount_gbp"], float)
+                assert all(isinstance(v, str) for v in row.values())
 
-        # Rule 8: MaterialExpansionPanel title <= 62 chars
+        if ctype == "VegaChart":
+            assert isinstance(comp.get("spec"), dict) and "path" in comp["spec"]
+
+        # Rule 8: MaterialExpansionPanel title <= 62 chars & children list
         if ctype == "MaterialExpansionPanel":
             assert len(comp["title"]) <= MAX_EXPANSION_TITLE_LEN
+            assert isinstance(comp.get("children"), list) and len(comp["children"]) >= 1
 
-        # Rule 9: MaterialButton action event structure
+        # Rule 9: MaterialButton action event structure & valid Angular Material variant
         if ctype == "MaterialButton":
+            assert comp.get("variant") in {
+                None,
+                "raised",
+                "flat",
+                "stroked",
+                "icon",
+                "fab",
+                "mini-fab",
+                "basic",
+            }
             event = comp.get("action", {}).get("event", {})
             assert isinstance(event.get("name"), str) and len(event["name"]) > 0
             assert isinstance(event.get("context"), dict)
+
+    _validate_against_cached_official_schemas_if_present(messages)
 
 
 def test_surface_a_servicenow_intake_card_compliance() -> None:

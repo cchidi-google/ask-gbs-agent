@@ -9,9 +9,12 @@ Every generated payload strictly conforms to Gemini Enterprise A2UI v0.9 rules:
 2. `createSurface.catalogId` matches `GE_COMPOSITE_CATALOG_ID`.
 3. `surfaceId` is consistent across `createSurface`, `updateComponents`, and `updateDataModel`.
 4. `updateComponents.components` has a unique `"id": "root"` (`MaterialCard` or `Canvas`).
-5. `Canvas` roots specify `"content": "<child_id>"`; `MaterialCard` roots specify `"child": "<child_id>"`.
-6. Every referenced child/content/accordion ID resolves to a valid component with zero cycles.
-7. `RichTable` includes `"spec": {}` and native numeric `float` values for currency/amount columns.
+5. `Canvas` and `MaterialCard` roots specify `"children": ["<child_id>", ...]` (`ChildList`).
+6. Every referenced `children` component ID resolves to a valid component with zero cycles,
+   and every component property matches the strict official Zod catalog schema with zero
+   unrecognized keys (`MaterialIcon.icon`, `MaterialExpansionPanel.children`, etc.).
+7. `MaterialTable` specifies `columns` (`header`, `field`) and string-typed `rows`, paired with
+   `VegaChart` bound via `updateDataModel` (`DynamicValue` `DataBinding`).
 8. `MaterialExpansionPanel` titles are strictly `<= 62` characters.
 9. `MaterialButton` actions follow `{"event": {"name": "...", "context": {...}}}`.
 10. Packaged wire payloads wrap JSON inside `<a2a_datapart_json>...</a2a_datapart_json>` with
@@ -166,6 +169,7 @@ def build_servicenow_intake_form_card(
             "createSurface": {
                 "surfaceId": surface_id,
                 "catalogId": GE_COMPOSITE_CATALOG_ID,
+                "sendDataModel": True,
             },
         },
         {
@@ -176,11 +180,13 @@ def build_servicenow_intake_form_card(
                     {
                         "id": "root",
                         "component": "MaterialCard",
-                        "child": "sn-form-col",
+                        "appearance": "outlined",
+                        "children": ["sn-form-col"],
                     },
                     {
                         "id": "sn-form-col",
                         "component": "MaterialColumn",
+                        "style": {"gap": "12px", "padding": "16px"},
                         "children": [
                             "sn-header-row",
                             "sn-subtitle",
@@ -196,12 +202,15 @@ def build_servicenow_intake_form_card(
                     {
                         "id": "sn-header-row",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px"},
                         "children": ["sn-icon", "sn-title"],
                     },
                     {
                         "id": "sn-icon",
                         "component": "MaterialIcon",
-                        "name": "support_agent",
+                        "icon": "support_agent",
+                        "color": "primary",
                     },
                     {
                         "id": "sn-title",
@@ -226,7 +235,6 @@ def build_servicenow_intake_form_card(
                         "id": "sn-select-category",
                         "component": "MaterialSelect",
                         "label": "GBS Service Area",
-                        "appearance": "outline",
                         "value": {"path": "/snTicket/serviceArea"},
                         "options": [
                             {
@@ -260,14 +268,12 @@ def build_servicenow_intake_form_card(
                         "component": "MaterialInput",
                         "label": "Invoice, PO, or Supplier Reference Number",
                         "placeholder": "e.g., 2158, INV00026056, or Custom Inquiry",
-                        "appearance": "outline",
                         "value": {"path": "/snTicket/referenceNumber"},
                     },
                     {
                         "id": "sn-select-priority",
                         "component": "MaterialSelect",
                         "label": "Urgency / Priority Level",
-                        "appearance": "outline",
                         "value": {"path": "/snTicket/priority"},
                         "options": [
                             {
@@ -288,8 +294,8 @@ def build_servicenow_intake_form_card(
                         "id": "sn-input-email",
                         "component": "MaterialInput",
                         "label": "Requester Contact Email",
+                        "type": "email",
                         "placeholder": "e.g., alex.rivera@enterprise-gbs.example.com",
-                        "appearance": "outline",
                         "value": {"path": "/snTicket/requesterEmail"},
                     },
                     {
@@ -297,14 +303,13 @@ def build_servicenow_intake_form_card(
                         "component": "MaterialInput",
                         "label": "Case Description & Action Requested",
                         "placeholder": "Describe the issue and required specialist action...",
-                        "multiline": True,
-                        "rows": 3,
-                        "appearance": "outline",
                         "value": {"path": "/snTicket/description"},
                     },
                     {
                         "id": "sn-btn-row",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px", "flexWrap": "wrap"},
                         "children": ["btn-submit-sn", "btn-cancel-sn"],
                     },
                     {
@@ -397,11 +402,13 @@ def build_servicenow_receipt_card(
                     {
                         "id": "root",
                         "component": "MaterialCard",
-                        "child": "receipt-col",
+                        "appearance": "outlined",
+                        "children": ["receipt-col"],
                     },
                     {
                         "id": "receipt-col",
                         "component": "MaterialColumn",
+                        "style": {"gap": "12px", "padding": "16px"},
                         "children": [
                             "receipt-header",
                             "receipt-div",
@@ -412,12 +419,15 @@ def build_servicenow_receipt_card(
                     {
                         "id": "receipt-header",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px"},
                         "children": ["receipt-icon", "receipt-title"],
                     },
                     {
                         "id": "receipt-icon",
                         "component": "MaterialIcon",
-                        "name": "check_circle",
+                        "icon": "check_circle",
+                        "color": "primary",
                     },
                     {
                         "id": "receipt-title",
@@ -464,6 +474,7 @@ def build_missing_identifier_lookup_card(
             "createSurface": {
                 "surfaceId": surface_id,
                 "catalogId": GE_COMPOSITE_CATALOG_ID,
+                "sendDataModel": True,
             },
         },
         {
@@ -474,11 +485,13 @@ def build_missing_identifier_lookup_card(
                     {
                         "id": "root",
                         "component": "MaterialCard",
-                        "child": "lookup-col",
+                        "appearance": "outlined",
+                        "children": ["lookup-col"],
                     },
                     {
                         "id": "lookup-col",
                         "component": "MaterialColumn",
+                        "style": {"gap": "12px", "padding": "16px"},
                         "children": [
                             "lookup-header",
                             "lookup-subtitle",
@@ -492,12 +505,15 @@ def build_missing_identifier_lookup_card(
                     {
                         "id": "lookup-header",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px"},
                         "children": ["lookup-icon", "lookup-title"],
                     },
                     {
                         "id": "lookup-icon",
                         "component": "MaterialIcon",
-                        "name": "manage_search",
+                        "icon": "manage_search",
+                        "color": "primary",
                     },
                     {
                         "id": "lookup-title",
@@ -520,7 +536,6 @@ def build_missing_identifier_lookup_card(
                         "component": "MaterialInput",
                         "label": "Invoice Number, Coupa ID, or PO Number",
                         "placeholder": "e.g., INV00026056, 2158, 23469, or PO #1763463",
-                        "appearance": "outline",
                         "value": {"path": "/quickLookup/identifier"},
                     },
                     {
@@ -528,14 +543,12 @@ def build_missing_identifier_lookup_card(
                         "component": "MaterialInput",
                         "label": "Supplier Name (Optional)",
                         "placeholder": "e.g., FieldSync Ops Ltd or Pacific Grid Energy Corp",
-                        "appearance": "outline",
                         "value": {"path": "/quickLookup/supplierName"},
                     },
                     {
                         "id": "lookup-select-type",
                         "component": "MaterialSelect",
                         "label": "Helpdesk Topic",
-                        "appearance": "outline",
                         "value": {"path": "/quickLookup/inquiryType"},
                         "options": [
                             {"label": "Invoice Approval / Hold Status", "value": "INVOICE_STATUS"},
@@ -547,6 +560,8 @@ def build_missing_identifier_lookup_card(
                     {
                         "id": "lookup-btn-row",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px", "flexWrap": "wrap"},
                         "children": ["btn-run-lookup", "btn-open-sn-fallback"],
                     },
                     {
@@ -642,11 +657,13 @@ def build_invoice_payment_status_card(
                     {
                         "id": "root",
                         "component": "MaterialCard",
-                        "child": "status-col",
+                        "appearance": "outlined",
+                        "children": ["status-col"],
                     },
                     {
                         "id": "status-col",
                         "component": "MaterialColumn",
+                        "style": {"gap": "12px", "padding": "16px"},
                         "children": [
                             "status-header",
                             "status-div",
@@ -658,12 +675,15 @@ def build_invoice_payment_status_card(
                     {
                         "id": "status-header",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px"},
                         "children": ["status-icon", "status-title"],
                     },
                     {
                         "id": "status-icon",
                         "component": "MaterialIcon",
-                        "name": "receipt_long",
+                        "icon": "receipt_long",
+                        "color": "primary",
                     },
                     {
                         "id": "status-title",
@@ -690,6 +710,8 @@ def build_invoice_payment_status_card(
                     {
                         "id": "status-actions",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px", "flexWrap": "wrap"},
                         "children": [
                             "btn-open-kb-canvas",
                             "btn-urgent-pay",
@@ -700,7 +722,7 @@ def build_invoice_payment_status_card(
                         "id": "btn-open-kb-canvas",
                         "component": "MaterialButton",
                         "label": f"Open {kb_ref} in Canvas",
-                        "variant": "outlined",
+                        "variant": "stroked",
                         "leadingIcon": "menu_book",
                         "action": {
                             "event": {
@@ -773,6 +795,7 @@ def build_urgent_payment_intake_card(
             "createSurface": {
                 "surfaceId": surface_id,
                 "catalogId": GE_COMPOSITE_CATALOG_ID,
+                "sendDataModel": True,
             },
         },
         {
@@ -783,11 +806,13 @@ def build_urgent_payment_intake_card(
                     {
                         "id": "root",
                         "component": "MaterialCard",
-                        "child": "urgent-col",
+                        "appearance": "outlined",
+                        "children": ["urgent-col"],
                     },
                     {
                         "id": "urgent-col",
                         "component": "MaterialColumn",
+                        "style": {"gap": "12px", "padding": "16px"},
                         "children": [
                             "urgent-header",
                             "urgent-note",
@@ -802,12 +827,15 @@ def build_urgent_payment_intake_card(
                     {
                         "id": "urgent-header",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px"},
                         "children": ["urgent-icon", "urgent-title"],
                     },
                     {
                         "id": "urgent-icon",
                         "component": "MaterialIcon",
-                        "name": "bolt",
+                        "icon": "bolt",
+                        "color": "primary",
                     },
                     {
                         "id": "urgent-title",
@@ -832,7 +860,6 @@ def build_urgent_payment_intake_card(
                         "id": "urgent-select-geo",
                         "component": "MaterialSelect",
                         "label": "Treasury Geography",
-                        "appearance": "outline",
                         "value": {"path": "/urgentPay/geography"},
                         "options": [
                             {"label": "EMEA (GBS-EMEA-AP-UrgentPayments)", "value": "EMEA"},
@@ -844,28 +871,26 @@ def build_urgent_payment_intake_card(
                         "id": "urgent-input-ou",
                         "component": "MaterialInput",
                         "label": "Operating Unit / Legal Entity",
-                        "appearance": "outline",
                         "value": {"path": "/urgentPay/operatingUnit"},
                     },
                     {
                         "id": "urgent-input-date",
                         "component": "MaterialInput",
                         "label": "Requested Early Payment Date (YYYY-MM-DD)",
-                        "appearance": "outline",
+                        "type": "date",
                         "value": {"path": "/urgentPay/requestedDate"},
                     },
                     {
                         "id": "urgent-input-just",
                         "component": "MaterialInput",
                         "label": "Controller Business Impact Justification",
-                        "multiline": True,
-                        "rows": 3,
-                        "appearance": "outline",
                         "value": {"path": "/urgentPay/justification"},
                     },
                     {
                         "id": "urgent-btn-row",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px", "flexWrap": "wrap"},
                         "children": ["btn-submit-urgent"],
                     },
                     {
@@ -910,22 +935,22 @@ def build_urgent_payment_intake_card(
 
 
 def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
-    """Builds Surface E (Reconciliation): Side-Panel `Canvas` with `RichTable` & Chart (`PAY-03`)."""
+    """Builds Surface E (Reconciliation): Side-Panel `Canvas` with `MaterialTable` & `VegaChart` (`PAY-03`)."""
     surface_id = "gbs-biodata-reconciliation-canvas"
     table_columns = [
-        {"key": "invoice_number", "label": "Invoice #", "type": "string"},
-        {"key": "coupa_id", "label": "Coupa ID", "type": "string"},
-        {"key": "po_number", "label": "Backing PO", "type": "string"},
-        {"key": "amount_gbp", "label": "Amount (GBP)", "type": "number"},
-        {"key": "coupa_status", "label": "Coupa Status", "type": "string"},
-        {"key": "oracle_status", "label": "Oracle Payment / Blocker", "type": "string"},
+        {"header": "Invoice #", "field": "invoice_number"},
+        {"header": "Coupa ID", "field": "coupa_id"},
+        {"header": "Backing PO", "field": "po_number"},
+        {"header": "Amount (GBP)", "field": "amount_gbp"},
+        {"header": "Coupa Status", "field": "coupa_status"},
+        {"header": "Oracle Payment / Blocker", "field": "oracle_status"},
     ]
     table_rows = [
         {
             "invoice_number": "23469",
             "coupa_id": "709187",
             "po_number": "PO #UK1734685",
-            "amount_gbp": 2196.85,
+            "amount_gbp": "2,196.85",
             "coupa_status": "Approved",
             "oracle_status": "PAID 2026-01-16 (EFT 1667857)",
         },
@@ -933,7 +958,7 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
             "invoice_number": "23104",
             "coupa_id": "711204",
             "po_number": "PO #UK1734685",
-            "amount_gbp": 940.00,
+            "amount_gbp": "940.00",
             "coupa_status": "Pending Approval",
             "oracle_status": "Unpaid — Awaiting PM Approval",
         },
@@ -941,7 +966,7 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
             "invoice_number": "23288",
             "coupa_id": "715890",
             "po_number": "PO #UK1754578",
-            "amount_gbp": 1450.00,
+            "amount_gbp": "1,450.00",
             "coupa_status": "Pending Receipt",
             "oracle_status": "Blocked — Missing 3-Way Goods Receipt",
         },
@@ -981,16 +1006,21 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
                     {
                         "id": "root",
                         "component": "Canvas",
-                        "content": "canvas-main-col",
+                        "autoOpen": True,
+                        "cardTitle": "BioData Registry Online — Statement Reconciliation",
+                        "cardDescription": "3-invoice Coupa + Oracle audit (4,586.85 GBP) with P1 Legal Escalation",
+                        "cardIcon": "table_chart",
+                        "children": ["canvas-main-col"],
                     },
                     {
                         "id": "canvas-main-col",
                         "component": "MaterialColumn",
+                        "style": {"gap": "14px", "padding": "16px"},
                         "children": [
                             "canvas-title",
                             "canvas-subtitle",
                             "canvas-div-top",
-                            "canvas-richtable",
+                            "canvas-table",
                             "canvas-chart",
                             "canvas-acc-1",
                             "canvas-acc-2",
@@ -1017,22 +1047,24 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
                         "component": "MaterialDivider",
                     },
                     {
-                        "id": "canvas-richtable",
-                        "component": "RichTable",
-                        "spec": {},
+                        "id": "canvas-table",
+                        "component": "MaterialTable",
+                        "caption": "BioData Registry Online Statement Invoices (Coupa + Oracle)",
                         "columns": table_columns,
                         "rows": table_rows,
                     },
                     {
                         "id": "canvas-chart",
-                        "component": "Chart",
-                        "spec": vega_spec,
+                        "component": "VegaChart",
+                        "spec": {"path": "/reconciliation/vegaSpec"},
+                        "height": 260,
                     },
                     {
                         "id": "canvas-acc-1",
                         "component": "MaterialExpansionPanel",
                         "title": _clamp_title("1. Immediate Remittance Proof for Invoice 23469"),
-                        "child": "canvas-acc-1-body",
+                        "expanded": True,
+                        "children": ["canvas-acc-1-body"],
                     },
                     {
                         "id": "canvas-acc-1-body",
@@ -1047,7 +1079,8 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
                         "id": "canvas-acc-2",
                         "component": "MaterialExpansionPanel",
                         "title": _clamp_title("2. Unblocking Invoices 23104 & 23288 + P1 Escalation"),
-                        "child": "canvas-acc-2-body",
+                        "expanded": True,
+                        "children": ["canvas-acc-2-body"],
                     },
                     {
                         "id": "canvas-acc-2-body",
@@ -1062,6 +1095,8 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
                     {
                         "id": "canvas-action-row",
                         "component": "MaterialRow",
+                        "align": "center",
+                        "style": {"gap": "8px", "flexWrap": "wrap"},
                         "children": ["btn-canvas-p1-case"],
                     },
                     {
@@ -1089,6 +1124,16 @@ def build_multi_invoice_reconciliation_canvas() -> dict[str, Any]:
                         },
                     },
                 ],
+            },
+        },
+        {
+            "version": A2UI_VERSION,
+            "updateDataModel": {
+                "surfaceId": surface_id,
+                "path": "/reconciliation",
+                "value": {
+                    "vegaSpec": vega_spec,
+                },
             },
         },
     ]
@@ -1247,7 +1292,11 @@ def build_interactive_kb_canvas(
         {
             "id": "root",
             "component": "Canvas",
-            "content": "canvas-main-col",
+            "autoOpen": True,
+            "cardTitle": kb_meta["title"],
+            "cardDescription": kb_meta["summary"],
+            "cardIcon": "menu_book",
+            "children": ["canvas-main-col"],
         },
         {
             "id": "canvas-title",
@@ -1280,7 +1329,8 @@ def build_interactive_kb_canvas(
                 "id": pid,
                 "component": "MaterialExpansionPanel",
                 "title": _clamp_title(step_title),
-                "child": bid,
+                "expanded": idx == 1,
+                "children": [bid],
             }
         )
         components.append(
@@ -1297,13 +1347,15 @@ def build_interactive_kb_canvas(
             {
                 "id": "kb-btn-row",
                 "component": "MaterialRow",
+                "align": "center",
+                "style": {"gap": "8px", "flexWrap": "wrap"},
                 "children": ["btn-kb-need-help"],
             },
             {
                 "id": "btn-kb-need-help",
                 "component": "MaterialButton",
                 "label": "Still Blocked? Open ServiceNow Case",
-                "variant": "outlined",
+                "variant": "stroked",
                 "leadingIcon": "support_agent",
                 "action": {
                     "event": {
@@ -1318,6 +1370,7 @@ def build_interactive_kb_canvas(
     main_col = {
         "id": "canvas-main-col",
         "component": "MaterialColumn",
+        "style": {"gap": "14px", "padding": "16px"},
         "children": ["canvas-title", "canvas-summary", "canvas-div", *panel_ids, "kb-btn-row"],
     }
     components.insert(1, main_col)
