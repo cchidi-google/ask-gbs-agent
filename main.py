@@ -1,19 +1,21 @@
 """FastAPI + Google ADK Server Wrapper for Cloud Run & Gemini Enterprise (`aecom-demo-uc1`).
 
-Exposes standard ADK endpoints (`/run`, `/run_sse`, `/list-apps`) via
-`google.adk.cli.fast_api.get_fast_api_app` alongside `/health` and `POST /warm`
+Exposes standard ADK endpoints (`/run`, `/run_sse`, `/list-apps`), A2A v1.0 protocol
+routes (`/a2a/ask_gbs_agent`, `/.well-known/agent-card.json`), `/health`, and `POST /warm`
 to pre-warm SQLite/FTS5/Vector indices and model routing before live demos.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from google.adk.cli.fast_api import get_fast_api_app
 
 from ask_gbs_agent.config.settings import get_settings
@@ -22,7 +24,10 @@ from ask_gbs_agent.observability.structured_logger import get_structured_logger
 from ask_gbs_agent.observability.tracing import configure_opentelemetry_tracing
 from ask_gbs_agent.orchestration.model_router import get_model_router
 
+warnings.filterwarnings("ignore", message=r".*\[EXPERIMENTAL\].*", category=UserWarning)
+
 ROOT_DIR = Path(__file__).resolve().parent
+AGENT_CARD_PATH = ROOT_DIR / "ask_gbs_agent" / "agent.json"
 settings = get_settings()
 logger = get_structured_logger("ask_gbs_agent.server")
 
@@ -35,6 +40,8 @@ app: FastAPI = get_fast_api_app(
     agents_dir=str(ROOT_DIR),
     allow_origins=["*"],
     web=os.getenv("ADK_ENABLE_WEB_UI", "true").lower() == "true",
+    a2a=os.getenv("ADK_ENABLE_A2A", "true").lower() == "true",
+    auto_create_session=True,
     otel_to_cloud=settings.enable_cloud_trace,
 )
 
@@ -45,6 +52,39 @@ app.router.routes = [
 ]
 
 
+def _resolve_dynamic_agent_card(request: Request) -> dict[str, Any]:
+    """Loads `ask_gbs_agent/agent.json` and stamps the live Cloud Run A2A RPC URL."""
+    card_data: dict[str, Any] = json.loads(AGENT_CARD_PATH.read_text(encoding="utf-8"))
+    base_url = (
+        os.getenv("PUBLIC_SERVICE_URL")
+        or str(request.base_url)
+    ).rstrip("/")
+    # Respect Cloud Run X-Forwarded-Proto HTTPS termination
+    if request.headers.get("x-forwarded-proto") == "https" and base_url.startswith("http://"):
+        base_url = "https://" + base_url[len("http://") :]
+    rpc_url = f"{base_url}/a2a/ask_gbs_agent"
+
+    interfaces = card_data.get("supportedInterfaces")
+    if isinstance(interfaces, list) and interfaces:
+        interfaces[0]["url"] = rpc_url
+    else:
+        card_data["supportedInterfaces"] = [
+            {
+                "url": rpc_url,
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0",
+            }
+        ]
+    return card_data
+
+
+@app.get("/.well-known/agent-card.json", tags=["a2a"])
+@app.get("/.well-known/agent.json", tags=["a2a"])
+async def root_agent_card_discovery(request: Request) -> dict[str, Any]:
+    """Root-level A2A Agent Card discovery alias for Gemini Enterprise registration."""
+    return _resolve_dynamic_agent_card(request)
+
+
 @app.get("/health", tags=["agentops"])
 async def health_check() -> dict[str, Any]:
     """Liveness and readiness probe for Google Cloud Run."""
@@ -53,6 +93,8 @@ async def health_check() -> dict[str, Any]:
         "service": "ask-gbs-agent",
         "project_id": settings.google_cloud_project,
         "region": settings.google_cloud_location,
+        "cloud_run_region": settings.cloud_run_region,
+        "a2a_endpoint": "/a2a/ask_gbs_agent",
         "a2ui_version": "v0.9",
     }
 
@@ -80,6 +122,7 @@ async def prewarm_runtime() -> dict[str, Any]:
         "project_id": settings.google_cloud_project,
         "warm_latency_ms": elapsed_ms,
         "indexed_kb_hits_verified": len(sample_hits),
+        "a2a_ready": AGENT_CARD_PATH.is_file(),
         "models_ready": [flash_check.selected_model, pro_check.selected_model],
     }
 

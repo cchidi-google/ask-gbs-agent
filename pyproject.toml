@@ -13,7 +13,8 @@ authors = [
     { name = "Enterprise GBS AI Engineering" }
 ]
 dependencies = [
-    "google-adk>=1.0.0",
+    "google-adk[a2a]>=2.0.0",
+    "a2a-sdk[http-server]>=0.3.4,<2",
     "google-genai>=1.0.0",
     "google-cloud-aiplatform>=1.70.0",
     "google-cloud-secret-manager>=2.20.0",
@@ -42,7 +43,7 @@ dev = [
 include = ["ask_gbs_agent*"]
 
 [tool.setuptools.package-data]
-ask_gbs_agent = ["data/*.md"]
+ask_gbs_agent = ["data/*.md", "agent.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

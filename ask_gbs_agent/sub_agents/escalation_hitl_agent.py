@@ -8,6 +8,8 @@ the mandatory `P1` ServiceNow escalation form (`Surface A`) in Step 2.
 
 from __future__ import annotations
 
+import warnings
+
 from google.adk.agents import LlmAgent, SequentialAgent
 
 from ask_gbs_agent.callbacks import (
@@ -61,14 +63,16 @@ def build_reconciliation_pipeline() -> SequentialAgent:
         after_tool_callback=after_tool_callback,
     )
 
-    return SequentialAgent(
-        name="reconciliation_to_escalation_pipeline",
-        description=(
-            "Deterministic 2-step SequentialAgent pipeline that reconciles multi-invoice "
-            "legal hold notices in the Side-Panel Canvas and stages a P1 ServiceNow case."
-        ),
-        sub_agents=[reconcile_step, stage_ticket_step],
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return SequentialAgent(
+            name="reconciliation_to_escalation_pipeline",
+            description=(
+                "Deterministic 2-step SequentialAgent pipeline that reconciles multi-invoice "
+                "legal hold notices in the Side-Panel Canvas and stages a P1 ServiceNow case."
+            ),
+            sub_agents=[reconcile_step, stage_ticket_step],
+        )
 
 
 reconciliation_to_escalation_pipeline = build_reconciliation_pipeline()

@@ -57,28 +57,55 @@ def extract_latest_user_text(llm_request: LlmRequest) -> str:
     return ""
 
 
+A2UI_KNOWN_EVENTS = (
+    "confirm_create_servicenow_case",
+    "cancel_servicenow_case",
+    "submit_invoice_quick_lookup",
+    "open_kb_in_canvas",
+    "request_urgent_early_payment",
+    "request_servicenow_intake_form",
+)
+
+
+def _extract_json_event_context(user_text: str) -> dict[str, Any]:
+    """Extracts the `context` object from an A2UI JSON button event payload if present."""
+    try:
+        start = user_text.find("{")
+        end = user_text.rfind("}")
+        if start != -1 and end > start:
+            parsed = json.loads(user_text[start : end + 1])
+            ctx = (
+                parsed.get("context")
+                or parsed.get("event", {}).get("context")
+                or parsed.get("action", {}).get("event", {}).get("context")
+                or {}
+            )
+            if isinstance(ctx, dict):
+                return ctx
+    except Exception:
+        pass
+    return {}
+
+
 def parse_a2ui_user_action_event(user_text: str, state: Any) -> bool:
-    """Detects Gemini Enterprise A2UI button events (`confirm_create_servicenow_case`) or confirmation."""
+    """Detects Gemini Enterprise A2UI button events across Surfaces A–E or confirmation text."""
     if not user_text or state is None:
         return False
 
-    # Case 1: Structured JSON event payload from Gemini Enterprise A2UI button click
+    ctx = _extract_json_event_context(user_text)
+    for event_name in A2UI_KNOWN_EVENTS:
+        if event_name in user_text:
+            state["last_a2ui_button_event"] = {
+                "event_name": event_name,
+                "context": ctx,
+            }
+            break
+
+    # Case 1: Structured JSON event payload from Gemini Enterprise Surface A submit button
     if "confirm_create_servicenow_case" in user_text:
         state["hitl_user_confirmed"] = True
-        try:
-            start = user_text.find("{")
-            end = user_text.rfind("}")
-            if start != -1 and end > start:
-                parsed = json.loads(user_text[start : end + 1])
-                ctx = (
-                    parsed.get("context")
-                    or parsed.get("event", {}).get("context")
-                    or {}
-                )
-                if isinstance(ctx, dict) and ctx:
-                    state["confirmed_a2ui_form_context"] = ctx
-        except Exception:
-            pass
+        if ctx:
+            state["confirmed_a2ui_form_context"] = ctx
         return True
 
     # Case 2: Natural language confirmation after Surface A intake card was staged
@@ -89,6 +116,17 @@ def parse_a2ui_user_action_event(user_text: str, state: Any) -> bool:
     if "cancel_servicenow_case" in user_text:
         state["hitl_user_confirmed"] = False
         state["hitl_ticket_staged"] = False
+        return False
+
+    # Case 3: Secondary interactive A2UI card/canvas action buttons (Surfaces C, D, E)
+    if "submit_invoice_quick_lookup" in user_text and ctx:
+        state["a2ui_quick_lookup_context"] = ctx
+    elif "open_kb_in_canvas" in user_text and ctx:
+        state["a2ui_kb_canvas_context"] = ctx
+    elif "request_urgent_early_payment" in user_text and ctx:
+        state["a2ui_urgent_payment_context"] = ctx
+    elif "request_servicenow_intake_form" in user_text and ctx:
+        state["a2ui_intake_request_context"] = ctx
 
     return False
 
@@ -148,6 +186,10 @@ def before_model_callback(
 
         decision = get_model_router().route_query(latest_user_text)
         exec_id = f"mdl-{uuid.uuid4().hex[:12]}"
+
+        # Dynamically assign routed model on Coordinator turns (Flash for routine, Gemini 4 Argon for escalations)
+        if agent_name == "ask_gbs_orchestrator" and hasattr(llm_request, "model"):
+            llm_request.model = decision.selected_model
 
         if state is not None:
             state["current_model_exec_id"] = exec_id

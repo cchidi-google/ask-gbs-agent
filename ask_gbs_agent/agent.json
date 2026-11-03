@@ -1,0 +1,231 @@
+{
+  "name": "ask_gbs_orchestrator",
+  "description": "Ask GBS \u2014 Enterprise Finance & Procurement Helpdesk Coordinator orchestrating Coupa/Oracle invoice & payment diagnostics, interactive Side-Panel A2UI Canvas reconciliations, and 2-step Human-in-the-Loop ServiceNow case creation.",
+  "supportedInterfaces": [
+    {
+      "url": "http://localhost:8080/a2a/ask_gbs_agent",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "version": "1.0.0",
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "ask_gbs_orchestrator",
+      "name": "model",
+      "description": "Ask GBS \u2014 Enterprise Finance & Procurement Helpdesk Coordinator orchestrating Coupa/Oracle invoice & payment diagnostics, interactive Side-Panel A2UI Canvas reconciliations, and 2-step Human-in-the-Loop ServiceNow case creation.",
+      "tags": [
+        "llm"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-lookup_coupa_oracle_invoice_record",
+      "name": "lookup_coupa_oracle_invoice_record",
+      "description": "Reconciles an invoice, payment batch, PO, or supplier across Coupa and Oracle Financials.\n\nSummary:\n    Performs a read-only cross-system diagnostic across Coupa (approval routing,\n    3-way match receipts, `VertexCallOut` tax logs), Oracle Financials (voucher IDs,\n    Net 30 submission date math per `KB0015901`, EFT payment references), the\n    Supplier Email Exemptions Registry (`KB0015802`), and Phase 1 Service Tiles.\n    Automatically queues the corresponding Gemini Enterprise A2UI v0.9 visual surface\n    (`Surface D` inline status tracker card or `Surface E` Side-Panel `Canvas`\n    multi-invoice `RichTable`).\n\nBusiness Rules:\n    - `RULE-01`: Strictly read-only ERP posture; never mutates Coupa or Oracle records.\n    - `RULE-02` (`KB0015901`): Net 30 due dates are calculated from the Coupa\n      Submission Date, NOT the supplier's PDF document date.\n    - `RULE-04` (`KB0015835`): Approved invoices with wrong amounts (`INV-11` / `2158`)\n      cannot be rejected in Coupa and require `stage_servicenow_case_intake_form`.\n    - `RULE-06` (`KB0015950`): External email domain mismatches (`PAY-05` / `2458874037`)\n      set `confidence_score = 62 (< 80)`, redact bank digits, and require security HITL.\n\nArgs:\n    identifier: Invoice number, Coupa ID, Oracle voucher/EFT reference, PO number,\n        supplier name, or scenario reference (e.g., `'INV00026056'`, `'2158'`, `'23469'`).\n    supplier_name: Optional supplier or vendor name provided by the user.\n    po_number: Optional Purchase Order number (e.g., `'PO #1763463'`).\n    inquirer_email: Optional email address of the requester or external supplier contact\n        used to verify domain alignment under `RULE-06`.\n    inquiry_context: Optional natural-language summary of the user's question.\n    tool_context: ADK `ToolContext` injected automatically at runtime for session state.\n\nReturns:\n    dict[str, Any]: Serialized `InvoiceDiagnosticOutput` when a record is resolved, or\n    a `GuidedToolErrorResponse` (`status=\"RECOVERABLE_ERROR\"`) instructing the LLM\n    how to recover (either via `request_missing_invoice_identifier_form` or\n    `stage_servicenow_case_intake_form` for out-of-scope custom inquiries).\n\nExample:\n    >>> res = lookup_coupa_oracle_invoice_record(identifier=\"INV00026056\")\n    >>> res[\"calculated_net_due_date\"]\n    '2026-01-14'",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-request_missing_invoice_identifier_form",
+      "name": "request_missing_invoice_identifier_form",
+      "description": "Stages the inline A2UI Quick-Lookup Clarification Card (`Surface C`) when identifiers are missing.\n\nSummary:\n    Invoked when a user asks a general invoice, payment, or PO status question\n    (e.g., *\"I need help with an invoice that hasn't been paid yet\"*) without\n    providing an Invoice Number, Coupa ID, PO Number, or Supplier Name.\n\nBusiness Rules:\n    - Prevents premature ServiceNow ticket dumps by capturing missing slots\n      conversationally and via an interactive A2UI `MaterialCard` (`Surface C`).\n\nArgs:\n    user_query: The user's original natural-language helpdesk message.\n    inquiry_type: One of `'INVOICE_STATUS'`, `'PAYMENT_INQUIRY'`, `'PO_SUPPORT'`,\n        or `'GENERAL'`. Defaults to `'INVOICE_STATUS'`.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Confirmation payload including `a2ui_surface_id=\"gbs-missing-identifier-card\"`\n    or a `GuidedToolErrorResponse` if arguments fail schema validation.\n\nExample:\n    >>> res = request_missing_invoice_identifier_form(\"I need help with an unpaid invoice\")\n    >>> res[\"a2ui_surface_id\"]\n    'gbs-missing-identifier-card'",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-open_interactive_coupa_kb_canvas",
+      "name": "open_interactive_coupa_kb_canvas",
+      "description": "Opens an interactive step-by-step Coupa / Procurement KB guide in the Side-Panel Canvas.\n\nSummary:\n    Retrieves curated ServiceNow Knowledge Base guidance (`KB0015760`\u2013`KB0016050`)\n    from the hybrid RAG memory service and queues an A2UI v0.9 `Canvas` (`Surface E`)\n    featuring collapsible `MaterialExpansionPanel` accordions in Gemini Enterprise.\n\nBusiness Rules:\n    - Keeps lengthy Coupa navigation checklists out of the chat stream by rendering\n      structured accordions in the right-hand Side-Panel `Canvas`.\n    - Enforces `<= 62` character titles on all `MaterialExpansionPanel` components.\n\nArgs:\n    kb_article_id: ServiceNow KB identifier matching `^KB\\d{7}$` (e.g., `'KB0015760'`\n        for Non-PO coding, `'KB0015802'` for Supplier Exemptions, `'KB0015810'` for\n        PO vs Non-PO routing, `'KB0015822'` for Holds/VertexCallOut, `'KB0015835'`\n        for Disputed/Wrong-Amount invoices, `'KB0015849'` for 3-Way Match Receipts,\n        `'KB0015860'` for Delegation/Notifications/Views, `'KB0015901'` for Net 30 math).\n    topic_focus: Optional user-specific focus question to highlight on the Canvas.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Structured KB article steps, hybrid RAG excerpts, and the queued\n    `a2ui_surface_id`, or `GuidedToolErrorResponse` if `kb_article_id` is malformed.\n\nExample:\n    >>> res = open_interactive_coupa_kb_canvas(kb_article_id=\"KB0015760\")\n    >>> res[\"kb_article_id\"]\n    'KB0015760'",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-evaluate_supplier_exemption_status",
+      "name": "evaluate_supplier_exemption_status",
+      "description": "Evaluates whether a supplier qualifies for PDF email e-billing (`KB0015802`).\n\nSummary:\n    Checks the Supplier Email Exemptions Registry (`RULE-05` / `KB0015802`) when an\n    invoice is missing from Coupa to determine if the vendor is an `EXEMPT`\n    regulated utility/municipal entity (permitted to email regional AP mailboxes)\n    or a `NON-EXEMPT` commercial vendor (required to submit via Coupa Supplier Portal).\n\nBusiness Rules:\n    - `EXEMPT` vendors (`PACIFIC GRID ENERGY CORP`, `AQUAFLOW UTILITIES LTD`,\n      `METRO MUNICIPAL WATER AUTHORITY`) submit PDFs to regional `ap-ebilling-*` mailboxes.\n    - `NON-EXEMPT` vendors (`NOVATECH LEASING SERVICES`, `TITAN EARTHWORKS LLC`,\n      `CRESTLINE BUILDERS INC`, and all unlisted commercial vendors) must use CSP.\n\nArgs:\n    supplier_name: Legal or trading name of the supplier to evaluate.\n    invoice_number: Optional missing invoice number being investigated.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Exemption status (`EXEMPT` or `NON-EXEMPT`), permitted submission\n    channel, and KB reference `KB0015802`.\n\nExample:\n    >>> res = evaluate_supplier_exemption_status(\"Pacific Grid Energy Corp\")\n    >>> res[\"exemption_status\"]\n    'EXEMPT'",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-open_urgent_payment_acceleration_form",
+      "name": "open_urgent_payment_acceleration_form",
+      "description": "Stages the Regional Urgent Early Payment Intake Form (`KB0015901` / `PAY-01`).\n\nSummary:\n    Renders an inline A2UI v0.9 `MaterialCard` form when a business requester needs\n    an out-of-cycle urgent EFT release ahead of the calculated Net 30 Coupa\n    Submission Due Date (e.g., `INV00026056` / `FieldSync Ops Ltd`).\n\nBusiness Rules:\n    - Per `KB0015901`, urgent payment acceleration requires Geography (`EMEA`, `AMER`,\n      `APAC`), Operating Unit, Requested Date, and Controller business impact justification.\n    - Sets `hitl_ticket_staged = True` in session state; final case submission still\n      requires explicit human confirmation (`Submit Urgent Payment Case`).\n\nArgs:\n    invoice_number: Approved invoice number requiring accelerated payment (e.g., `'INV00026056'`).\n    supplier_name: Supplier legal name associated with the invoice.\n    geography: Regional treasury queue (`'EMEA'`, `'AMER'`, or `'APAC'`).\n    operating_unit: Enterprise operating unit code (e.g., `'UK-OPS-01'`).\n    requested_payment_date: Desired early EFT release date (`YYYY-MM-DD`).\n    business_justification: Controller business impact reason for early payment.\n    requester_email: Business email of the requester.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Staged form metadata including `a2ui_surface_id` and target queue.\n\nExample:\n    >>> res = open_urgent_payment_acceleration_form(invoice_number=\"INV00026056\")\n    >>> res[\"status\"]\n    'URGENT_PAYMENT_FORM_STAGED'",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-stage_servicenow_case_intake_form",
+      "name": "stage_servicenow_case_intake_form",
+      "description": "Step 1 of Illustrative ServiceNow Case Creation: Stages the A2UI Case Intake Form (`Surface A`).\n\nSummary:\n    Pre-populates and queues the interactive A2UI v0.9 `MaterialCard` ServiceNow\n    Case Intake Form (`gbs-servicenow-intake-form`) whenever a user request requires\n    back-office ERP intervention (e.g., approved wrong-amount invoice `2158`,\n    multi-invoice legal hold `PAY-03`, security mismatch `PAY-05`, PDF remittance\n    `PAY-04`) or falls outside the self-service RAG knowledge base.\n\nBusiness Rules:\n    - Sets `hitl_ticket_staged = True` in session state and waits for the human user\n      to review the form and click `[Submit ServiceNow Case]` (`confirm_create_servicenow_case`).\n    - Never creates a ticket directly without human confirmation (Rubric 3.4).\n\nArgs:\n    description: Pre-populated diagnostic context and specialist action requested\n        (minimum 10 characters).\n    service_area: Target GBS queue category (`'INVOICE_SUPPORT'`, `'PAYMENT_SUPPORT'`,\n        `'URGENT_PAYMENT'`, `'LEGAL_ESCALATION'`, `'VENDOR_SECURITY'`, or `'GENERAL_TRIAGE'`).\n    reference_number: Invoice number, PO number, Vendor ID, or `'Custom Inquiry'`.\n    priority: Priority level (`'P1'`, `'P2'`, or `'P3'`).\n    requester_email: Business email of the requester.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Staged intake summary including `a2ui_surface_id=\"gbs-servicenow-intake-form\"`\n    and target assignment group, or `GuidedToolErrorResponse` on validation error.\n\nExample:\n    >>> res = stage_servicenow_case_intake_form(\n    ...     description=\"Approved Invoice 2158 ($22,772) billed for wrong amount; hold needed.\",\n    ...     service_area=\"INVOICE_SUPPORT\",\n    ...     reference_number=\"2158\",\n    ...     priority=\"P2\",\n    ... )\n    >>> res[\"a2ui_surface_id\"]\n    'gbs-servicenow-intake-form'",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "ask_gbs_orchestrator-submit_confirmed_servicenow_case",
+      "name": "submit_confirmed_servicenow_case",
+      "description": "Step 2 of Illustrative ServiceNow Case Creation: Generates Confirmed Receipt (`Surface B`).\n\nSummary:\n    Executes Step 2 of the ServiceNow case workflow ONLY after human-in-the-loop\n    confirmation (`state[\"hitl_user_confirmed\"] == True`). Generates a deterministic\n    illustrative ServiceNow Case ID (e.g., `CS9940120`), records the PII-scrubbed\n    ticket in SQLite session memory, and queues the A2UI v0.9 Confirmation Receipt\n    Card (`Surface B`) with zero live ServiceNow mutation.\n\nBusiness Rules:\n    - **Hard HITL Code Stop (Rubric 3.4)**: Execution is blocked unless\n      `tool_context.state[\"hitl_user_confirmed\"]` is `True`.\n    - Routes to the regional queue & SLA in `ASSIGNMENT_GROUP_MATRIX`.\n\nArgs:\n    description: Confirmed case description and specialist instructions.\n    service_area: Confirmed GBS functional area (`'INVOICE_SUPPORT'`, etc.).\n    reference_number: Confirmed Invoice, PO, or custom inquiry identifier.\n    priority: Confirmed priority code (`'P1'`, `'P2'`, or `'P3'`).\n    requester_email: Confirmed requester business contact email.\n    user_confirmed: Boolean confirmation flag (also verified against session state).\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Serialized `ServiceNowTicketReceiptOutput` (`CS9940120`) when\n    confirmed, or `GuidedToolErrorResponse` (`HITL_CONFIRMATION_REQUIRED`) if\n    invoked prior to human confirmation.\n\nExample:\n    >>> # Requires tool_context.state[\"hitl_user_confirmed\"] == True\n    >>> pass",
+      "tags": [
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "invoice_payment_diagnostic_agent_invoice_payment_diagnostic_agent",
+      "name": "invoice_payment_diagnostic_agent: model",
+      "description": "Fast Coupa + Oracle invoice status, Net 30 due date math (KB0015901), missing-identifier Quick-Lookup card (Surface C), urgent early payment intake (PAY-01), and Supplier Email Exemptions (KB0015802) specialist.",
+      "tags": [
+        "sub_agent:invoice_payment_diagnostic_agent",
+        "llm"
+      ]
+    },
+    {
+      "id": "invoice_payment_diagnostic_agent_invoice_payment_diagnostic_agent-lookup_coupa_oracle_invoice_record",
+      "name": "invoice_payment_diagnostic_agent: lookup_coupa_oracle_invoice_record",
+      "description": "Reconciles an invoice, payment batch, PO, or supplier across Coupa and Oracle Financials.\n\nSummary:\n    Performs a read-only cross-system diagnostic across Coupa (approval routing,\n    3-way match receipts, `VertexCallOut` tax logs), Oracle Financials (voucher IDs,\n    Net 30 submission date math per `KB0015901`, EFT payment references), the\n    Supplier Email Exemptions Registry (`KB0015802`), and Phase 1 Service Tiles.\n    Automatically queues the corresponding Gemini Enterprise A2UI v0.9 visual surface\n    (`Surface D` inline status tracker card or `Surface E` Side-Panel `Canvas`\n    multi-invoice `RichTable`).\n\nBusiness Rules:\n    - `RULE-01`: Strictly read-only ERP posture; never mutates Coupa or Oracle records.\n    - `RULE-02` (`KB0015901`): Net 30 due dates are calculated from the Coupa\n      Submission Date, NOT the supplier's PDF document date.\n    - `RULE-04` (`KB0015835`): Approved invoices with wrong amounts (`INV-11` / `2158`)\n      cannot be rejected in Coupa and require `stage_servicenow_case_intake_form`.\n    - `RULE-06` (`KB0015950`): External email domain mismatches (`PAY-05` / `2458874037`)\n      set `confidence_score = 62 (< 80)`, redact bank digits, and require security HITL.\n\nArgs:\n    identifier: Invoice number, Coupa ID, Oracle voucher/EFT reference, PO number,\n        supplier name, or scenario reference (e.g., `'INV00026056'`, `'2158'`, `'23469'`).\n    supplier_name: Optional supplier or vendor name provided by the user.\n    po_number: Optional Purchase Order number (e.g., `'PO #1763463'`).\n    inquirer_email: Optional email address of the requester or external supplier contact\n        used to verify domain alignment under `RULE-06`.\n    inquiry_context: Optional natural-language summary of the user's question.\n    tool_context: ADK `ToolContext` injected automatically at runtime for session state.\n\nReturns:\n    dict[str, Any]: Serialized `InvoiceDiagnosticOutput` when a record is resolved, or\n    a `GuidedToolErrorResponse` (`status=\"RECOVERABLE_ERROR\"`) instructing the LLM\n    how to recover (either via `request_missing_invoice_identifier_form` or\n    `stage_servicenow_case_intake_form` for out-of-scope custom inquiries).\n\nExample:\n    >>> res = lookup_coupa_oracle_invoice_record(identifier=\"INV00026056\")\n    >>> res[\"calculated_net_due_date\"]\n    '2026-01-14'",
+      "tags": [
+        "sub_agent:invoice_payment_diagnostic_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "invoice_payment_diagnostic_agent_invoice_payment_diagnostic_agent-request_missing_invoice_identifier_form",
+      "name": "invoice_payment_diagnostic_agent: request_missing_invoice_identifier_form",
+      "description": "Stages the inline A2UI Quick-Lookup Clarification Card (`Surface C`) when identifiers are missing.\n\nSummary:\n    Invoked when a user asks a general invoice, payment, or PO status question\n    (e.g., *\"I need help with an invoice that hasn't been paid yet\"*) without\n    providing an Invoice Number, Coupa ID, PO Number, or Supplier Name.\n\nBusiness Rules:\n    - Prevents premature ServiceNow ticket dumps by capturing missing slots\n      conversationally and via an interactive A2UI `MaterialCard` (`Surface C`).\n\nArgs:\n    user_query: The user's original natural-language helpdesk message.\n    inquiry_type: One of `'INVOICE_STATUS'`, `'PAYMENT_INQUIRY'`, `'PO_SUPPORT'`,\n        or `'GENERAL'`. Defaults to `'INVOICE_STATUS'`.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Confirmation payload including `a2ui_surface_id=\"gbs-missing-identifier-card\"`\n    or a `GuidedToolErrorResponse` if arguments fail schema validation.\n\nExample:\n    >>> res = request_missing_invoice_identifier_form(\"I need help with an unpaid invoice\")\n    >>> res[\"a2ui_surface_id\"]\n    'gbs-missing-identifier-card'",
+      "tags": [
+        "sub_agent:invoice_payment_diagnostic_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "invoice_payment_diagnostic_agent_invoice_payment_diagnostic_agent-evaluate_supplier_exemption_status",
+      "name": "invoice_payment_diagnostic_agent: evaluate_supplier_exemption_status",
+      "description": "Evaluates whether a supplier qualifies for PDF email e-billing (`KB0015802`).\n\nSummary:\n    Checks the Supplier Email Exemptions Registry (`RULE-05` / `KB0015802`) when an\n    invoice is missing from Coupa to determine if the vendor is an `EXEMPT`\n    regulated utility/municipal entity (permitted to email regional AP mailboxes)\n    or a `NON-EXEMPT` commercial vendor (required to submit via Coupa Supplier Portal).\n\nBusiness Rules:\n    - `EXEMPT` vendors (`PACIFIC GRID ENERGY CORP`, `AQUAFLOW UTILITIES LTD`,\n      `METRO MUNICIPAL WATER AUTHORITY`) submit PDFs to regional `ap-ebilling-*` mailboxes.\n    - `NON-EXEMPT` vendors (`NOVATECH LEASING SERVICES`, `TITAN EARTHWORKS LLC`,\n      `CRESTLINE BUILDERS INC`, and all unlisted commercial vendors) must use CSP.\n\nArgs:\n    supplier_name: Legal or trading name of the supplier to evaluate.\n    invoice_number: Optional missing invoice number being investigated.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Exemption status (`EXEMPT` or `NON-EXEMPT`), permitted submission\n    channel, and KB reference `KB0015802`.\n\nExample:\n    >>> res = evaluate_supplier_exemption_status(\"Pacific Grid Energy Corp\")\n    >>> res[\"exemption_status\"]\n    'EXEMPT'",
+      "tags": [
+        "sub_agent:invoice_payment_diagnostic_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "invoice_payment_diagnostic_agent_invoice_payment_diagnostic_agent-open_urgent_payment_acceleration_form",
+      "name": "invoice_payment_diagnostic_agent: open_urgent_payment_acceleration_form",
+      "description": "Stages the Regional Urgent Early Payment Intake Form (`KB0015901` / `PAY-01`).\n\nSummary:\n    Renders an inline A2UI v0.9 `MaterialCard` form when a business requester needs\n    an out-of-cycle urgent EFT release ahead of the calculated Net 30 Coupa\n    Submission Due Date (e.g., `INV00026056` / `FieldSync Ops Ltd`).\n\nBusiness Rules:\n    - Per `KB0015901`, urgent payment acceleration requires Geography (`EMEA`, `AMER`,\n      `APAC`), Operating Unit, Requested Date, and Controller business impact justification.\n    - Sets `hitl_ticket_staged = True` in session state; final case submission still\n      requires explicit human confirmation (`Submit Urgent Payment Case`).\n\nArgs:\n    invoice_number: Approved invoice number requiring accelerated payment (e.g., `'INV00026056'`).\n    supplier_name: Supplier legal name associated with the invoice.\n    geography: Regional treasury queue (`'EMEA'`, `'AMER'`, or `'APAC'`).\n    operating_unit: Enterprise operating unit code (e.g., `'UK-OPS-01'`).\n    requested_payment_date: Desired early EFT release date (`YYYY-MM-DD`).\n    business_justification: Controller business impact reason for early payment.\n    requester_email: Business email of the requester.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Staged form metadata including `a2ui_surface_id` and target queue.\n\nExample:\n    >>> res = open_urgent_payment_acceleration_form(invoice_number=\"INV00026056\")\n    >>> res[\"status\"]\n    'URGENT_PAYMENT_FORM_STAGED'",
+      "tags": [
+        "sub_agent:invoice_payment_diagnostic_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "procurement_kb_advisory_agent_procurement_kb_advisory_agent",
+      "name": "procurement_kb_advisory_agent: model",
+      "description": "Coupa how-to navigation, Non-PO coding (KB0015760), 3-way match goods receipting (KB0015849), delegation & custom views (KB0015860), Saviynt access, PO amendments, Coupa SIM, and interactive Side-Panel KB Canvas specialist.",
+      "tags": [
+        "sub_agent:procurement_kb_advisory_agent",
+        "llm"
+      ]
+    },
+    {
+      "id": "procurement_kb_advisory_agent_procurement_kb_advisory_agent-open_interactive_coupa_kb_canvas",
+      "name": "procurement_kb_advisory_agent: open_interactive_coupa_kb_canvas",
+      "description": "Opens an interactive step-by-step Coupa / Procurement KB guide in the Side-Panel Canvas.\n\nSummary:\n    Retrieves curated ServiceNow Knowledge Base guidance (`KB0015760`\u2013`KB0016050`)\n    from the hybrid RAG memory service and queues an A2UI v0.9 `Canvas` (`Surface E`)\n    featuring collapsible `MaterialExpansionPanel` accordions in Gemini Enterprise.\n\nBusiness Rules:\n    - Keeps lengthy Coupa navigation checklists out of the chat stream by rendering\n      structured accordions in the right-hand Side-Panel `Canvas`.\n    - Enforces `<= 62` character titles on all `MaterialExpansionPanel` components.\n\nArgs:\n    kb_article_id: ServiceNow KB identifier matching `^KB\\d{7}$` (e.g., `'KB0015760'`\n        for Non-PO coding, `'KB0015802'` for Supplier Exemptions, `'KB0015810'` for\n        PO vs Non-PO routing, `'KB0015822'` for Holds/VertexCallOut, `'KB0015835'`\n        for Disputed/Wrong-Amount invoices, `'KB0015849'` for 3-Way Match Receipts,\n        `'KB0015860'` for Delegation/Notifications/Views, `'KB0015901'` for Net 30 math).\n    topic_focus: Optional user-specific focus question to highlight on the Canvas.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Structured KB article steps, hybrid RAG excerpts, and the queued\n    `a2ui_surface_id`, or `GuidedToolErrorResponse` if `kb_article_id` is malformed.\n\nExample:\n    >>> res = open_interactive_coupa_kb_canvas(kb_article_id=\"KB0015760\")\n    >>> res[\"kb_article_id\"]\n    'KB0015760'",
+      "tags": [
+        "sub_agent:procurement_kb_advisory_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "procurement_kb_advisory_agent_procurement_kb_advisory_agent-evaluate_supplier_exemption_status",
+      "name": "procurement_kb_advisory_agent: evaluate_supplier_exemption_status",
+      "description": "Evaluates whether a supplier qualifies for PDF email e-billing (`KB0015802`).\n\nSummary:\n    Checks the Supplier Email Exemptions Registry (`RULE-05` / `KB0015802`) when an\n    invoice is missing from Coupa to determine if the vendor is an `EXEMPT`\n    regulated utility/municipal entity (permitted to email regional AP mailboxes)\n    or a `NON-EXEMPT` commercial vendor (required to submit via Coupa Supplier Portal).\n\nBusiness Rules:\n    - `EXEMPT` vendors (`PACIFIC GRID ENERGY CORP`, `AQUAFLOW UTILITIES LTD`,\n      `METRO MUNICIPAL WATER AUTHORITY`) submit PDFs to regional `ap-ebilling-*` mailboxes.\n    - `NON-EXEMPT` vendors (`NOVATECH LEASING SERVICES`, `TITAN EARTHWORKS LLC`,\n      `CRESTLINE BUILDERS INC`, and all unlisted commercial vendors) must use CSP.\n\nArgs:\n    supplier_name: Legal or trading name of the supplier to evaluate.\n    invoice_number: Optional missing invoice number being investigated.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Exemption status (`EXEMPT` or `NON-EXEMPT`), permitted submission\n    channel, and KB reference `KB0015802`.\n\nExample:\n    >>> res = evaluate_supplier_exemption_status(\"Pacific Grid Energy Corp\")\n    >>> res[\"exemption_status\"]\n    'EXEMPT'",
+      "tags": [
+        "sub_agent:procurement_kb_advisory_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "procurement_kb_advisory_agent_procurement_kb_advisory_agent-lookup_coupa_oracle_invoice_record",
+      "name": "procurement_kb_advisory_agent: lookup_coupa_oracle_invoice_record",
+      "description": "Reconciles an invoice, payment batch, PO, or supplier across Coupa and Oracle Financials.\n\nSummary:\n    Performs a read-only cross-system diagnostic across Coupa (approval routing,\n    3-way match receipts, `VertexCallOut` tax logs), Oracle Financials (voucher IDs,\n    Net 30 submission date math per `KB0015901`, EFT payment references), the\n    Supplier Email Exemptions Registry (`KB0015802`), and Phase 1 Service Tiles.\n    Automatically queues the corresponding Gemini Enterprise A2UI v0.9 visual surface\n    (`Surface D` inline status tracker card or `Surface E` Side-Panel `Canvas`\n    multi-invoice `RichTable`).\n\nBusiness Rules:\n    - `RULE-01`: Strictly read-only ERP posture; never mutates Coupa or Oracle records.\n    - `RULE-02` (`KB0015901`): Net 30 due dates are calculated from the Coupa\n      Submission Date, NOT the supplier's PDF document date.\n    - `RULE-04` (`KB0015835`): Approved invoices with wrong amounts (`INV-11` / `2158`)\n      cannot be rejected in Coupa and require `stage_servicenow_case_intake_form`.\n    - `RULE-06` (`KB0015950`): External email domain mismatches (`PAY-05` / `2458874037`)\n      set `confidence_score = 62 (< 80)`, redact bank digits, and require security HITL.\n\nArgs:\n    identifier: Invoice number, Coupa ID, Oracle voucher/EFT reference, PO number,\n        supplier name, or scenario reference (e.g., `'INV00026056'`, `'2158'`, `'23469'`).\n    supplier_name: Optional supplier or vendor name provided by the user.\n    po_number: Optional Purchase Order number (e.g., `'PO #1763463'`).\n    inquirer_email: Optional email address of the requester or external supplier contact\n        used to verify domain alignment under `RULE-06`.\n    inquiry_context: Optional natural-language summary of the user's question.\n    tool_context: ADK `ToolContext` injected automatically at runtime for session state.\n\nReturns:\n    dict[str, Any]: Serialized `InvoiceDiagnosticOutput` when a record is resolved, or\n    a `GuidedToolErrorResponse` (`status=\"RECOVERABLE_ERROR\"`) instructing the LLM\n    how to recover (either via `request_missing_invoice_identifier_form` or\n    `stage_servicenow_case_intake_form` for out-of-scope custom inquiries).\n\nExample:\n    >>> res = lookup_coupa_oracle_invoice_record(identifier=\"INV00026056\")\n    >>> res[\"calculated_net_due_date\"]\n    '2026-01-14'",
+      "tags": [
+        "sub_agent:procurement_kb_advisory_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "escalation_hitl_specialist_agent_escalation_hitl_specialist_agent",
+      "name": "escalation_hitl_specialist_agent: model",
+      "description": "Frontier reasoning specialist (`gemini-4-argon`) for multi-invoice legal reminders (PAY-03), external email domain mismatch security holds (PAY-05), approved wrong-amount Oracle holds (INV-11), out-of-scope custom inquiries, and the 2-step HITL ServiceNow case creation workflow (Surface A & Surface B).",
+      "tags": [
+        "sub_agent:escalation_hitl_specialist_agent",
+        "llm"
+      ]
+    },
+    {
+      "id": "escalation_hitl_specialist_agent_escalation_hitl_specialist_agent-lookup_coupa_oracle_invoice_record",
+      "name": "escalation_hitl_specialist_agent: lookup_coupa_oracle_invoice_record",
+      "description": "Reconciles an invoice, payment batch, PO, or supplier across Coupa and Oracle Financials.\n\nSummary:\n    Performs a read-only cross-system diagnostic across Coupa (approval routing,\n    3-way match receipts, `VertexCallOut` tax logs), Oracle Financials (voucher IDs,\n    Net 30 submission date math per `KB0015901`, EFT payment references), the\n    Supplier Email Exemptions Registry (`KB0015802`), and Phase 1 Service Tiles.\n    Automatically queues the corresponding Gemini Enterprise A2UI v0.9 visual surface\n    (`Surface D` inline status tracker card or `Surface E` Side-Panel `Canvas`\n    multi-invoice `RichTable`).\n\nBusiness Rules:\n    - `RULE-01`: Strictly read-only ERP posture; never mutates Coupa or Oracle records.\n    - `RULE-02` (`KB0015901`): Net 30 due dates are calculated from the Coupa\n      Submission Date, NOT the supplier's PDF document date.\n    - `RULE-04` (`KB0015835`): Approved invoices with wrong amounts (`INV-11` / `2158`)\n      cannot be rejected in Coupa and require `stage_servicenow_case_intake_form`.\n    - `RULE-06` (`KB0015950`): External email domain mismatches (`PAY-05` / `2458874037`)\n      set `confidence_score = 62 (< 80)`, redact bank digits, and require security HITL.\n\nArgs:\n    identifier: Invoice number, Coupa ID, Oracle voucher/EFT reference, PO number,\n        supplier name, or scenario reference (e.g., `'INV00026056'`, `'2158'`, `'23469'`).\n    supplier_name: Optional supplier or vendor name provided by the user.\n    po_number: Optional Purchase Order number (e.g., `'PO #1763463'`).\n    inquirer_email: Optional email address of the requester or external supplier contact\n        used to verify domain alignment under `RULE-06`.\n    inquiry_context: Optional natural-language summary of the user's question.\n    tool_context: ADK `ToolContext` injected automatically at runtime for session state.\n\nReturns:\n    dict[str, Any]: Serialized `InvoiceDiagnosticOutput` when a record is resolved, or\n    a `GuidedToolErrorResponse` (`status=\"RECOVERABLE_ERROR\"`) instructing the LLM\n    how to recover (either via `request_missing_invoice_identifier_form` or\n    `stage_servicenow_case_intake_form` for out-of-scope custom inquiries).\n\nExample:\n    >>> res = lookup_coupa_oracle_invoice_record(identifier=\"INV00026056\")\n    >>> res[\"calculated_net_due_date\"]\n    '2026-01-14'",
+      "tags": [
+        "sub_agent:escalation_hitl_specialist_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "escalation_hitl_specialist_agent_escalation_hitl_specialist_agent-stage_servicenow_case_intake_form",
+      "name": "escalation_hitl_specialist_agent: stage_servicenow_case_intake_form",
+      "description": "Step 1 of Illustrative ServiceNow Case Creation: Stages the A2UI Case Intake Form (`Surface A`).\n\nSummary:\n    Pre-populates and queues the interactive A2UI v0.9 `MaterialCard` ServiceNow\n    Case Intake Form (`gbs-servicenow-intake-form`) whenever a user request requires\n    back-office ERP intervention (e.g., approved wrong-amount invoice `2158`,\n    multi-invoice legal hold `PAY-03`, security mismatch `PAY-05`, PDF remittance\n    `PAY-04`) or falls outside the self-service RAG knowledge base.\n\nBusiness Rules:\n    - Sets `hitl_ticket_staged = True` in session state and waits for the human user\n      to review the form and click `[Submit ServiceNow Case]` (`confirm_create_servicenow_case`).\n    - Never creates a ticket directly without human confirmation (Rubric 3.4).\n\nArgs:\n    description: Pre-populated diagnostic context and specialist action requested\n        (minimum 10 characters).\n    service_area: Target GBS queue category (`'INVOICE_SUPPORT'`, `'PAYMENT_SUPPORT'`,\n        `'URGENT_PAYMENT'`, `'LEGAL_ESCALATION'`, `'VENDOR_SECURITY'`, or `'GENERAL_TRIAGE'`).\n    reference_number: Invoice number, PO number, Vendor ID, or `'Custom Inquiry'`.\n    priority: Priority level (`'P1'`, `'P2'`, or `'P3'`).\n    requester_email: Business email of the requester.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Staged intake summary including `a2ui_surface_id=\"gbs-servicenow-intake-form\"`\n    and target assignment group, or `GuidedToolErrorResponse` on validation error.\n\nExample:\n    >>> res = stage_servicenow_case_intake_form(\n    ...     description=\"Approved Invoice 2158 ($22,772) billed for wrong amount; hold needed.\",\n    ...     service_area=\"INVOICE_SUPPORT\",\n    ...     reference_number=\"2158\",\n    ...     priority=\"P2\",\n    ... )\n    >>> res[\"a2ui_surface_id\"]\n    'gbs-servicenow-intake-form'",
+      "tags": [
+        "sub_agent:escalation_hitl_specialist_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "escalation_hitl_specialist_agent_escalation_hitl_specialist_agent-submit_confirmed_servicenow_case",
+      "name": "escalation_hitl_specialist_agent: submit_confirmed_servicenow_case",
+      "description": "Step 2 of Illustrative ServiceNow Case Creation: Generates Confirmed Receipt (`Surface B`).\n\nSummary:\n    Executes Step 2 of the ServiceNow case workflow ONLY after human-in-the-loop\n    confirmation (`state[\"hitl_user_confirmed\"] == True`). Generates a deterministic\n    illustrative ServiceNow Case ID (e.g., `CS9940120`), records the PII-scrubbed\n    ticket in SQLite session memory, and queues the A2UI v0.9 Confirmation Receipt\n    Card (`Surface B`) with zero live ServiceNow mutation.\n\nBusiness Rules:\n    - **Hard HITL Code Stop (Rubric 3.4)**: Execution is blocked unless\n      `tool_context.state[\"hitl_user_confirmed\"]` is `True`.\n    - Routes to the regional queue & SLA in `ASSIGNMENT_GROUP_MATRIX`.\n\nArgs:\n    description: Confirmed case description and specialist instructions.\n    service_area: Confirmed GBS functional area (`'INVOICE_SUPPORT'`, etc.).\n    reference_number: Confirmed Invoice, PO, or custom inquiry identifier.\n    priority: Confirmed priority code (`'P1'`, `'P2'`, or `'P3'`).\n    requester_email: Confirmed requester business contact email.\n    user_confirmed: Boolean confirmation flag (also verified against session state).\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Serialized `ServiceNowTicketReceiptOutput` (`CS9940120`) when\n    confirmed, or `GuidedToolErrorResponse` (`HITL_CONFIRMATION_REQUIRED`) if\n    invoked prior to human confirmation.\n\nExample:\n    >>> # Requires tool_context.state[\"hitl_user_confirmed\"] == True\n    >>> pass",
+      "tags": [
+        "sub_agent:escalation_hitl_specialist_agent",
+        "llm",
+        "tools"
+      ]
+    },
+    {
+      "id": "escalation_hitl_specialist_agent_escalation_hitl_specialist_agent-open_urgent_payment_acceleration_form",
+      "name": "escalation_hitl_specialist_agent: open_urgent_payment_acceleration_form",
+      "description": "Stages the Regional Urgent Early Payment Intake Form (`KB0015901` / `PAY-01`).\n\nSummary:\n    Renders an inline A2UI v0.9 `MaterialCard` form when a business requester needs\n    an out-of-cycle urgent EFT release ahead of the calculated Net 30 Coupa\n    Submission Due Date (e.g., `INV00026056` / `FieldSync Ops Ltd`).\n\nBusiness Rules:\n    - Per `KB0015901`, urgent payment acceleration requires Geography (`EMEA`, `AMER`,\n      `APAC`), Operating Unit, Requested Date, and Controller business impact justification.\n    - Sets `hitl_ticket_staged = True` in session state; final case submission still\n      requires explicit human confirmation (`Submit Urgent Payment Case`).\n\nArgs:\n    invoice_number: Approved invoice number requiring accelerated payment (e.g., `'INV00026056'`).\n    supplier_name: Supplier legal name associated with the invoice.\n    geography: Regional treasury queue (`'EMEA'`, `'AMER'`, or `'APAC'`).\n    operating_unit: Enterprise operating unit code (e.g., `'UK-OPS-01'`).\n    requested_payment_date: Desired early EFT release date (`YYYY-MM-DD`).\n    business_justification: Controller business impact reason for early payment.\n    requester_email: Business email of the requester.\n    tool_context: ADK `ToolContext` injected automatically at runtime.\n\nReturns:\n    dict[str, Any]: Staged form metadata including `a2ui_surface_id` and target queue.\n\nExample:\n    >>> res = open_urgent_payment_acceleration_form(invoice_number=\"INV00026056\")\n    >>> res[\"status\"]\n    'URGENT_PAYMENT_FORM_STAGED'",
+      "tags": [
+        "sub_agent:escalation_hitl_specialist_agent",
+        "llm",
+        "tools"
+      ]
+    }
+  ]
+}

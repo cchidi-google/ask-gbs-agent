@@ -31,10 +31,10 @@ flowchart LR
         Canvas["Side-Panel Canvas (A2UI v0.9)\n• Surface E: Multi-Invoice RichTable & Chart\n• Surface E: Interactive Coupa KB Accordions"]
     end
 
-    subgraph Runtime["GCP Project: aecom-demo-uc1 (Cloud Run / Vertex AI Agent Engine)"]
-        FastAPI["FastAPI + ADK Runner (main.py)\n/run, /run_sse, /list-apps, /health, /warm"]
+    subgraph Runtime["GCP Project: aecom-demo-uc1 (Cloud Run us-central1 + Vertex AI global)"]
+        FastAPI["FastAPI + ADK + A2A v1.0 Server (main.py)\n/a2a/ask_gbs_agent, /.well-known/agent-card.json\n/run, /run_sse, /health, /warm"]
         Plugins["ADK Plugins & Lifecycle Callbacks\n• A2uiCanvasPlugin (<a2a_datapart_json>)\n• GbsPolicyGuardrailPlugin (Confidence < 80 Mask)\n• before_tool_callback Hard HITL Gate"]
-        Coord["Coordinator: ask_gbs_orchestrator\n(gemini-4-argon + StrategicModelRouter)"]
+        Coord["Coordinator: ask_gbs_orchestrator\n(Dynamic Flash / Gemini 4 Argon Routing)"]
         Diag["invoice_payment_diagnostic_agent\n(gemini-2.5-flash)"]
         KB["procurement_kb_advisory_agent\n(gemini-2.5-flash)"]
         Esc["escalation_hitl_specialist_agent\n(gemini-4-argon + SequentialAgent)"]
@@ -106,8 +106,8 @@ adk web
 # Launch headless ADK OpenAPI / SSE server
 adk api_server
 
-# Run live ADK trajectory evaluations against Vertex AI
-adk eval ask_gbs_agent eval/golden_dataset.json
+# Run live ADK trajectory evaluations against Vertex AI (ADK-native EvalSet)
+adk eval ask_gbs_agent eval/ask_gbs_golden.evalset.json
 ```
 
 ---
@@ -122,11 +122,10 @@ terraform plan -var="project_id=aecom-demo-uc1" -var="region=us-central1"
 terraform apply -var="project_id=aecom-demo-uc1" -var="region=us-central1"
 ```
 
-### 5.2 Deploy via ADK CLI (Cloud Run or Vertex AI Agent Engine)
+### 5.2 Deploy to Cloud Run (A2A + `/warm`) or Vertex AI Agent Engine
 ```bash
-# Option A: Cloud Run deployment with warm instance & /warm endpoint
+# Option A: Cloud Run deployment (builds Dockerfile/main.py with A2A v1.0, min-instances=1 & GOOGLE_CLOUD_LOCATION=global for Gemini 4 Argon)
 ./deploy_cloud_run.sh
-# (Wraps: adk deploy cloud_run --project=aecom-demo-uc1 --region=us-central1 --service_name=ask-gbs-agent --with_ui ask_gbs_agent)
 
 # Option B: Vertex AI Agent Engine deployment
 adk deploy agent_engine --project=aecom-demo-uc1 --region=us-central1 ask_gbs_agent
@@ -134,14 +133,14 @@ adk deploy agent_engine --project=aecom-demo-uc1 --region=us-central1 ask_gbs_ag
 python deploy_agent_engine.py --project_id=aecom-demo-uc1 --location=us-central1
 ```
 
-### 5.3 Register in Gemini Enterprise
+### 5.3 Register in Gemini Enterprise (A2A v1.0 Agent Card)
 ```bash
 export AGENT_ENDPOINT_URI="$(gcloud run services describe ask-gbs-agent --project=aecom-demo-uc1 --region=us-central1 --format='value(status.url)')"
 ./register_gemini_enterprise.sh
 ```
 Or in **Google Cloud Console > Gemini Enterprise (Agent Builder)** (`project=aecom-demo-uc1`):
 1. Open your **Gemini Enterprise App** -> **Agents** -> **Create / Register Agent** -> **Custom Agent (ADK / A2A)**.
-2. Set Display Name to `Ask GBS — Enterprise Finance & Procurement Helpdesk`, paste your Cloud Run URL or ReasoningEngine resource name, bind `ask-gbs-agent-sa@aecom-demo-uc1.iam.gserviceaccount.com`, and click **Save & Publish**.
+2. Set Display Name to `Ask GBS — Enterprise Finance & Procurement Helpdesk`, paste `${AGENT_ENDPOINT_URI}/a2a/ask_gbs_agent` (Agent Card auto-discovered at `/.well-known/agent-card.json`), bind `ask-gbs-agent-sa@aecom-demo-uc1.iam.gserviceaccount.com`, and click **Save & Publish**.
 
 ---
 

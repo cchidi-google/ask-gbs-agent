@@ -2,29 +2,40 @@
 set -euo pipefail
 
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-aecom-demo-uc1}"
-REGION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
+CLOUD_RUN_REGION="${CLOUD_RUN_REGION:-us-central1}"
+VERTEX_LOCATION="${GOOGLE_CLOUD_LOCATION:-global}"
 SERVICE_NAME="${SERVICE_NAME:-ask-gbs-agent}"
 
-echo "==> Deploying Ask GBS ADK Agent to Google Cloud Run in project ${PROJECT_ID} (${REGION})..."
+echo "==> Deploying Ask GBS ADK + A2A Server (Dockerfile / main.py) to Cloud Run in ${PROJECT_ID} (${CLOUD_RUN_REGION})..."
+echo "==> Vertex AI Model Endpoint Location: ${VERTEX_LOCATION} (Gemini 4 Argon + Gemini 2.5 Flash)"
 
-adk deploy cloud_run \
+gcloud run deploy "${SERVICE_NAME}" \
+  --source="." \
   --project="${PROJECT_ID}" \
-  --region="${REGION}" \
-  --service_name="${SERVICE_NAME}" \
-  --with_ui \
-  ask_gbs_agent
+  --region="${CLOUD_RUN_REGION}" \
+  --min-instances=1 \
+  --max-instances=10 \
+  --cpu=2 \
+  --memory=2Gi \
+  --timeout=300 \
+  --allow-unauthenticated \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${VERTEX_LOCATION},CLOUD_RUN_REGION=${CLOUD_RUN_REGION},GOOGLE_GENAI_USE_VERTEXAI=TRUE,ADK_ENABLE_A2A=true,ADK_ENABLE_WEB_UI=true,ENABLE_CLOUD_LOGGING=true,ENABLE_CLOUD_TRACE=true,ENABLE_SECRET_MANAGER=true"
 
-echo "==> Updating Cloud Run service ${SERVICE_NAME} to min-instances=1 for zero-cold-start demos..."
+SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" --format='value(status.url)')"
+echo "==> Deployed Service URL: ${SERVICE_URL}"
+echo "==> A2A Endpoint URL:     ${SERVICE_URL}/a2a/ask_gbs_agent"
+
 gcloud run services update "${SERVICE_NAME}" \
   --project="${PROJECT_ID}" \
-  --region="${REGION}" \
-  --min-instances=1 \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=TRUE,ENABLE_CLOUD_LOGGING=true,ENABLE_CLOUD_TRACE=true,ENABLE_SECRET_MANAGER=true"
+  --region="${CLOUD_RUN_REGION}" \
+  --update-env-vars="PUBLIC_SERVICE_URL=${SERVICE_URL}" >/dev/null
 
-SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
-echo "==> Deployed Service URL: ${SERVICE_URL}"
-
+ID_TOKEN="$(gcloud auth print-identity-token 2>/dev/null || true)"
 echo "==> Pre-warming /warm endpoint..."
-curl -fsS -X POST "${SERVICE_URL}/warm" || true
+if [[ -n "${ID_TOKEN}" ]]; then
+  curl -fsS -X POST -H "Authorization: Bearer ${ID_TOKEN}" "${SERVICE_URL}/warm" || true
+else
+  curl -fsS -X POST "${SERVICE_URL}/warm" || true
+fi
 echo ""
 echo "==> Deployment complete!"

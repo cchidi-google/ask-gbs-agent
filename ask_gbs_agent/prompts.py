@@ -83,6 +83,11 @@ Procurement (POs, Change Orders, Goods Receipts), Supplier Information Managemen
   `stage_servicenow_case_intake_form` (`Surface A`) first. Wait for human confirmation.
 - **User Clicks 'Submit ServiceNow Case' (`confirm_create_servicenow_case`) or Confirms**:
   Call `submit_confirmed_servicenow_case` to generate the illustrative Case Receipt (`Surface B`).
+- **User Clicks Secondary A2UI Card / Canvas Action Buttons**:
+  - `submit_invoice_quick_lookup` -> Extract `identifier` (or `supplierName`) from the event payload and call `lookup_coupa_oracle_invoice_record` (or `request_missing_invoice_identifier_form` if left blank).
+  - `open_kb_in_canvas` -> Extract `kbArticleId` and call `open_interactive_coupa_kb_canvas`.
+  - `request_urgent_early_payment` -> Extract `invoiceNumber` / `supplierName` and call `open_urgent_payment_acceleration_form`.
+  - `request_servicenow_intake_form` -> Extract `referenceNumber` / `supplierName` and call `stage_servicenow_case_intake_form` (`Surface A`).
 </DECISION_TREE>
 
 <SECURITY_GUARDRAILS>

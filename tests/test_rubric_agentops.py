@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from ask_gbs_agent.agent import app as adk_app
 from ask_gbs_agent.agent import root_agent
+from ask_gbs_agent.callbacks import before_model_callback, parse_a2ui_user_action_event
 from ask_gbs_agent.config.secret_manager import SecretManagerResolver
 from ask_gbs_agent.memory import (
     HistoryCompactionManager,
@@ -231,3 +232,66 @@ def test_rubric_category_5_secret_manager_and_fastapi_warm_endpoints(
         warm_body = warm.json()
         assert warm_body["status"] == "warmed"
         assert warm_body["indexed_kb_hits_verified"] >= 1
+        assert warm_body["a2a_ready"] is True
+
+        # Verify Gemini Enterprise A2A v1.0 Agent Card discovery routes
+        root_card = client.get(
+            "/.well-known/agent-card.json",
+            headers={"x-forwarded-proto": "https"},
+        )
+        assert root_card.status_code == 200
+        card_json = root_card.json()
+        assert card_json["name"] == "ask_gbs_orchestrator"
+        assert card_json["supportedInterfaces"][0]["url"].endswith("/a2a/ask_gbs_agent")
+        assert card_json["supportedInterfaces"][0]["url"].startswith("https://")
+
+        mounted_a2a_card = client.get("/a2a/ask_gbs_agent/.well-known/agent-card.json")
+        assert mounted_a2a_card.status_code == 200
+
+
+def test_dynamic_model_mutation_a2ui_buttons_and_native_adk_evalset() -> None:
+    """Verifies dynamic `llm_request.model` mutation, secondary A2UI events, and ADK `EvalSet`."""
+    from google.adk.evaluation.eval_set import EvalSet
+    from google.genai import types
+
+    # 1. Dynamic Flash vs Gemini 4 Argon assignment inside before_model_callback
+    cb_ctx = SimpleNamespace(
+        state={},
+        agent_name="ask_gbs_orchestrator",
+        invocation_id="test-dyn-model-01",
+    )
+    flash_req = SimpleNamespace(
+        model="gemini-4-argon",
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text="Check INV00026056")])],
+    )
+    before_model_callback(cb_ctx, flash_req)  # type: ignore[arg-type]
+    assert flash_req.model == "gemini-2.5-flash"
+
+    argon_req = SimpleNamespace(
+        model="gemini-2.5-flash",
+        contents=[
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text="Second Payment Reminder Notice from BioData Registry Online for 23469, 23104, 23288"
+                    )
+                ],
+            )
+        ],
+    )
+    before_model_callback(cb_ctx, argon_req)  # type: ignore[arg-type]
+    assert argon_req.model == "gemini-4-argon"
+
+    # 2. Secondary A2UI button events unpack cleanly into session state
+    ui_state: dict[str, object] = {}
+    parse_a2ui_user_action_event(
+        '{"event": {"name": "submit_invoice_quick_lookup", "context": {"identifier": "INV00026056"}}}',
+        ui_state,
+    )
+    assert ui_state["a2ui_quick_lookup_context"] == {"identifier": "INV00026056"}
+
+    # 3. Native ADK EvalSet schema validation (`eval/ask_gbs_golden.evalset.json`)
+    evalset_path = Path(__file__).resolve().parent.parent / "eval" / "ask_gbs_golden.evalset.json"
+    eval_set = EvalSet.model_validate_json(evalset_path.read_text(encoding="utf-8"))
+    assert len(eval_set.eval_cases) >= 6

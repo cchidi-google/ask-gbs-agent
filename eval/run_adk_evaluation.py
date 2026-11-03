@@ -133,11 +133,17 @@ def run_deterministic_golden_suite(dataset_path: Path) -> dict[str, Any]:
                 }
             )
 
+    from google.adk.evaluation.eval_set import EvalSet
+
+    evalset_path = dataset_path.parent / "ask_gbs_golden.evalset.json"
+    parsed_evalset = EvalSet.model_validate_json(evalset_path.read_text(encoding="utf-8"))
+
     return {
         "total_cases": len(cases),
         "passed": passed,
         "failed": len(failures),
         "pass_rate_pct": round((passed / max(1, len(cases))) * 100.0, 2),
+        "adk_native_evalset_cases_verified": len(parsed_evalset.eval_cases),
         "failures": failures,
     }
 
@@ -146,9 +152,10 @@ async def run_live_adk_evaluator(eval_dir: Path) -> None:
     """Invokes `google.adk.evaluation.agent_evaluator.AgentEvaluator` against live Vertex AI."""
     from google.adk.evaluation.agent_evaluator import AgentEvaluator
 
+    evalset_file = eval_dir / "ask_gbs_golden.evalset.json"
     await AgentEvaluator.evaluate(
         agent_module="ask_gbs_agent",
-        eval_dataset_file_path_or_dir=str(eval_dir),
+        eval_dataset_file_path_or_dir=str(evalset_file),
         num_runs=1,
     )
 

@@ -33,9 +33,14 @@ class GbsAgentSettings(BaseSettings):
         description="Target Google Cloud Project ID hosting Vertex AI and Cloud Run.",
     )
     google_cloud_location: str = Field(
-        default="us-central1",
+        default="global",
         alias="GOOGLE_CLOUD_LOCATION",
-        description="Primary Vertex AI and Cloud Run region.",
+        description="Vertex AI model endpoint location (`global` required for frontier `gemini-4-argon`).",
+    )
+    cloud_run_region: str = Field(
+        default="us-central1",
+        alias="CLOUD_RUN_REGION",
+        description="Regional Google Cloud Run and Secret Manager hosting location.",
     )
     google_genai_use_vertexai: bool = Field(
         default=True,

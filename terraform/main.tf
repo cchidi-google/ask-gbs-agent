@@ -140,7 +140,15 @@ resource "google_cloud_run_v2_service" "ask_gbs_service" {
       }
       env {
         name  = "GOOGLE_CLOUD_LOCATION"
+        value = "global"
+      }
+      env {
+        name  = "CLOUD_RUN_REGION"
         value = var.region
+      }
+      env {
+        name  = "ADK_ENABLE_A2A"
+        value = "true"
       }
       env {
         name  = "GOOGLE_GENAI_USE_VERTEXAI"

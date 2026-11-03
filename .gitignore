@@ -37,3 +37,6 @@ htmlcov/
 .DS_Store
 .vscode/
 .idea/
+
+# Local Authoring / Scaffolding Prompt Notes
+adk_gemini_enterprise_scaffolding_prompt.md
