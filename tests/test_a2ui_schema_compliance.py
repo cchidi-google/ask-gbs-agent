@@ -167,3 +167,59 @@ def test_surface_e_all_kb_canvases_compliance(kb_id: str) -> None:
 def test_urgent_payment_acceleration_card_compliance() -> None:
     pkg = build_urgent_payment_intake_card(invoice_number="INV00026056")
     assert_ten_a2ui_catalog_rules(pkg, expected_root_type="MaterialCard")
+
+
+@pytest.mark.asyncio
+async def test_a2ui_plugin_emits_true_a2a_dataparts_and_compacts_history() -> None:
+    """Verifies A2UI surfaces serialize as structured A2A DataParts (never raw chat text)."""
+    from types import SimpleNamespace
+
+    from a2a.compat.v0_3.conversions import to_compat_part
+    from google.adk.a2a.converters.part_converter import convert_genai_part_to_a2a_part
+    from google.genai import types
+
+    from ask_gbs_agent.memory.compaction import HistoryCompactionManager
+    from ask_gbs_agent.plugins.a2ui_canvas_plugin import A2uiCanvasPlugin, queue_a2ui_surface
+
+    state: dict[str, Any] = {}
+    queue_a2ui_surface(state, build_missing_identifier_lookup_card())
+    plugin = A2uiCanvasPlugin()
+
+    llm_resp = SimpleNamespace(
+        partial=False,
+        content=types.Content(
+            role="model",
+            parts=[types.Part.from_text(text="Please enter your invoice identifier.")],
+        ),
+    )
+    cb_ctx = SimpleNamespace(state=state)
+    await plugin.after_model_callback(callback_context=cb_ctx, llm_response=llm_resp)  # type: ignore[arg-type]
+
+    parts = llm_resp.content.parts
+    assert len(parts) == 4  # 1 text part + 3 A2UI v0.9 DataPart messages
+    assert "<a2a_datapart_json>" not in (parts[0].text or "")
+
+    compat_parts = [to_compat_part(convert_genai_part_to_a2a_part(p)) for p in parts[1:]]  # type: ignore[arg-type]
+    assert all(cp.root.kind == "data" for cp in compat_parts)
+    assert all((cp.root.metadata or {}).get("mimeType") == A2UI_MIME_TYPE for cp in compat_parts)
+    assert "createSurface" in compat_parts[0].root.data
+
+    # Verify Turn 2 compaction strips Vertex-unsupported part_metadata & normalizes blobs
+    user_click_blob = types.Part(
+        inline_data=types.Blob(
+            data=b'<a2a_datapart_json>{"userAction":{"name":"confirm_create_servicenow_case","context":{"referenceNumber":"2158"}}}</a2a_datapart_json>',
+            mime_type="text/plain",
+        )
+    )
+    req = SimpleNamespace(
+        contents=[
+            llm_resp.content,
+            types.Content(role="user", parts=[user_click_blob]),
+        ]
+    )
+    HistoryCompactionManager().compact_llm_request(req)
+    for c in req.contents:
+        for p in c.parts:
+            assert getattr(p, "part_metadata", None) is None
+            assert getattr(p, "inline_data", None) is None
+    assert "confirm_create_servicenow_case" in (req.contents[-1].parts[0].text or "")

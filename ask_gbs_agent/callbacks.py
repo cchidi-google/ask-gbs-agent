@@ -77,7 +77,11 @@ def _extract_json_event_context(user_text: str) -> dict[str, Any]:
             ctx = (
                 parsed.get("context")
                 or parsed.get("event", {}).get("context")
+                or parsed.get("userAction", {}).get("context")
+                or parsed.get("action", {}).get("context")
                 or parsed.get("action", {}).get("event", {}).get("context")
+                or parsed.get("data", {}).get("userAction", {}).get("context")
+                or parsed.get("data", {}).get("action", {}).get("context")
                 or {}
             )
             if isinstance(ctx, dict):
@@ -233,9 +237,15 @@ def after_model_callback(
     latency_ms = max(0.1, (time.perf_counter() - start_ts) * 1000.0)
     surface_id = state.get("last_a2ui_surface_id") if state is not None else None
 
+    # Skip intermediate partial streaming chunks; finalize only on complete turn
+    if getattr(llm_response, "partial", False):
+        return None
+
     # Blast-radius guard when attaching queued A2UI surfaces if plugin hasn't consumed them yet
     response_text_snippets: list[str] = []
     try:
+        from ask_gbs_agent.plugins.a2ui_canvas_plugin import build_genai_a2ui_parts
+
         content = getattr(llm_response, "content", None)
         parts = list(getattr(content, "parts", None) or []) if content else []
         for p in parts:
@@ -245,12 +255,16 @@ def after_model_callback(
         has_function_call = any(getattr(p, "function_call", None) is not None for p in parts)
         pending = list(state.get("pending_a2ui_parts") or []) if state is not None else []
         if pending and not has_function_call:
+            existing_surfaces = {
+                (getattr(p, "part_metadata", None) or {}).get("surface_id")
+                for p in parts
+                if getattr(p, "part_metadata", None)
+            }
             for surface_pkg in pending:
-                wire_tag = surface_pkg.get("wire_tag")
-                if wire_tag and not any(
-                    wire_tag in (getattr(existing, "text", "") or "") for existing in parts
-                ):
-                    parts.append(types.Part.from_text(text=f"\n\n{wire_tag}"))
+                sid = surface_pkg.get("surface_id")
+                if sid not in existing_surfaces:
+                    parts.extend(build_genai_a2ui_parts(surface_pkg))
+                    existing_surfaces.add(sid)
             if content is None:
                 llm_response.content = types.Content(role="model", parts=parts)
             else:

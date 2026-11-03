@@ -86,6 +86,53 @@ def package_a2ui_datapart(
         }
 
 
+def build_genai_a2ui_parts(packaged_surface: dict[str, Any]) -> list[types.Part]:
+    """Converts a packaged A2UI surface into ADK `inline_data` A2A `DataPart` blobs.
+
+    ADK's `convert_genai_part_to_a2a_part` translates `Part(inline_data=Blob(
+    mime_type='text/plain', data=b'<a2a_datapart_json>...</a2a_datapart_json>'),
+    part_metadata={'mimeType': 'application/json+a2ui', ...})` into structured A2A
+    `DataPart` protocol messages rather than plain chat `TextPart` strings.
+    """
+    messages = packaged_surface.get("messages") or []
+    surface_id = str(packaged_surface.get("surface_id") or "gbs-surface")
+    readable_text = str(packaged_surface.get("readable_text") or "Interactive GBS A2UI Surface")
+    meta = {
+        "mimeType": A2UI_MIME_TYPE,
+        "surface_id": surface_id,
+        "readable_text": readable_text,
+    }
+
+    is_a2a_v1 = True
+    try:
+        from google.adk.a2a import _compat as adk_a2a_compat
+
+        is_a2a_v1 = bool(getattr(adk_a2a_compat, "IS_A2A_V1", True))
+    except Exception:
+        pass
+
+    out_parts: list[types.Part] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        payload_obj = msg if is_a2a_v1 else {"kind": "data", "data": msg, "metadata": meta}
+        raw_bytes = (
+            b"<a2a_datapart_json>"
+            + json.dumps(payload_obj, ensure_ascii=False).encode("utf-8")
+            + b"</a2a_datapart_json>"
+        )
+        out_parts.append(
+            types.Part(
+                inline_data=types.Blob(
+                    data=raw_bytes,
+                    mime_type="text/plain",
+                ),
+                part_metadata=dict(meta),
+            )
+        )
+    return out_parts
+
+
 def queue_a2ui_surface(
     state: Optional[dict[str, Any]],
     packaged_surface: dict[str, Any],
@@ -1309,6 +1356,10 @@ class A2uiCanvasPlugin(BasePlugin):
     ) -> Optional[LlmResponse]:
         """Attaches queued A2UI v0.9 surfaces to the final assistant turn safely."""
         try:
+            # Wait for the final non-partial aggregated turn during streaming
+            if getattr(llm_response, "partial", False):
+                return None
+
             state = callback_context.state
             pending = state.get("pending_a2ui_parts") if state is not None else None
             if not pending:
@@ -1322,12 +1373,16 @@ class A2uiCanvasPlugin(BasePlugin):
             if has_function_call:
                 return None
 
+            existing_surfaces = {
+                (getattr(p, "part_metadata", None) or {}).get("surface_id")
+                for p in parts
+                if getattr(p, "part_metadata", None)
+            }
             for surface_pkg in pending:
-                wire_tag = surface_pkg.get("wire_tag")
-                if wire_tag and not any(
-                    wire_tag in (getattr(existing, "text", "") or "") for existing in parts
-                ):
-                    parts.append(types.Part.from_text(text=f"\n\n{wire_tag}"))
+                sid = surface_pkg.get("surface_id")
+                if sid not in existing_surfaces:
+                    parts.extend(build_genai_a2ui_parts(surface_pkg))
+                    existing_surfaces.add(sid)
 
             if content is None:
                 llm_response.content = types.Content(role="model", parts=parts)

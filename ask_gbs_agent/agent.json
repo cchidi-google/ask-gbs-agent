@@ -10,7 +10,19 @@
   ],
   "version": "1.0.0",
   "capabilities": {
-    "streaming": true
+    "streaming": true,
+    "pushNotifications": false,
+    "extensions": [
+      {
+        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.9",
+        "description": "Gemini Enterprise A2UI v0.9 inline cards and Side-Panel Canvas",
+        "params": {
+          "supportedCatalogIds": [
+            "https://www.gstatic.com/vertexaisearch/a2ui/v0_9/gemini_enterprise_composite_catalog.json"
+          ]
+        }
+      }
+    ]
   },
   "defaultInputModes": [
     "text/plain"

@@ -125,16 +125,64 @@ class HistoryCompactionManager:
         if not contents or not isinstance(contents, list):
             return 0
 
-        # Step 1: Strip historical A2UI JSON blobs from all prior model turns
+        # Step 1: Normalize A2A DataPart inline blobs & strip Vertex-unsupported part_metadata
         total_tokens = 0
         for idx, content in enumerate(contents):
+            role = getattr(content, "role", "user") or "user"
             parts = getattr(content, "parts", None) or []
+            normalized_parts: list[Any] = []
+            seen_surface_markers: set[str] = set()
+
             for part in parts:
+                meta = getattr(part, "part_metadata", None) or {}
+                if hasattr(part, "part_metadata") and getattr(part, "part_metadata", None) is not None:
+                    part.part_metadata = None
+
+                inline = getattr(part, "inline_data", None)
+                blob_bytes = getattr(inline, "data", None) if inline is not None else None
+                if (
+                    isinstance(blob_bytes, (bytes, bytearray))
+                    and blob_bytes.startswith(b"<a2a_datapart_json>")
+                    and blob_bytes.endswith(b"</a2a_datapart_json>")
+                ):
+                    inner_raw = bytes(blob_bytes[len(b"<a2a_datapart_json>") : -len(b"</a2a_datapart_json>")]).decode(
+                        "utf-8", errors="replace"
+                    )
+                    if role == "user":
+                        action_part = types.Part.from_text(text=f"[A2UI User Action Event] {inner_raw}")
+                        normalized_parts.append(action_part)
+                        total_tokens += self.estimate_tokens(action_part.text or "")
+                    else:
+                        readable = str(meta.get("readable_text") or meta.get("surface_id") or "")
+                        if not readable:
+                            try:
+                                parsed_blob = json.loads(inner_raw)
+                                if isinstance(parsed_blob, dict):
+                                    readable = (
+                                        (parsed_blob.get("createSurface") or {}).get("surfaceId")
+                                        or (parsed_blob.get("updateComponents") or {}).get("surfaceId")
+                                        or (parsed_blob.get("metadata") or {}).get("readable_text")
+                                        or "Interactive GBS A2UI Surface"
+                                    )
+                            except Exception:
+                                readable = "Interactive GBS A2UI Surface"
+                        marker = f"[Rendered A2UI Surface: {readable}]"
+                        if marker not in seen_surface_markers:
+                            seen_surface_markers.add(marker)
+                            marker_part = types.Part.from_text(text=marker)
+                            normalized_parts.append(marker_part)
+                            total_tokens += self.estimate_tokens(marker)
+                    continue
+
                 part_text = getattr(part, "text", None)
                 if part_text:
                     if idx < len(contents) - 1 and "<a2a_datapart_json>" in part_text:
                         part.text = self.strip_a2ui_blobs(part_text)
                     total_tokens += self.estimate_tokens(part.text)
+                normalized_parts.append(part)
+
+            if parts:
+                content.parts = normalized_parts
 
         # Step 2: Summarize older turns if turn threshold or token budget is exceeded
         if len(contents) > self.keep_recent_turns or total_tokens > self.max_tokens:
