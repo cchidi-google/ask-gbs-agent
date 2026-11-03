@@ -1,6 +1,6 @@
-"""Sub-Agent 3: Escalation, Security & HITL ServiceNow Specialist (`gemini-2.5-pro` + `SequentialAgent`).
+"""Sub-Agent 3: Escalation, Security & HITL ServiceNow Specialist (`gemini-4-argon` + `SequentialAgent`).
 
-Combines an `LlmAgent` powered by `gemini-2.5-pro` with a structured ADK
+Combines an `LlmAgent` powered by `gemini-4-argon` (Gemini 4 Argon) with a structured ADK
 `SequentialAgent` pipeline (`reconciliation_to_escalation_pipeline`) that
 reconciles multi-invoice legal hold statements (`PAY-03`) in Step 1 and stages
 the mandatory `P1` ServiceNow escalation form (`Surface A`) in Step 2.
@@ -77,14 +77,14 @@ reconciliation_to_escalation_pipeline = build_reconciliation_pipeline()
 def build_escalation_hitl_subagent(
     pipeline: SequentialAgent | None = None,
 ) -> LlmAgent:
-    """Constructs the `gemini-2.5-pro` Escalation, Security & HITL ServiceNow specialist."""
+    """Constructs the `gemini-4-argon` Escalation, Security & HITL ServiceNow specialist."""
     settings = get_settings()
     attached_pipeline = pipeline or build_reconciliation_pipeline()
     return LlmAgent(
         name="escalation_hitl_specialist_agent",
         model=settings.gemini_pro_model,
         description=(
-            "High-reasoning specialist (`gemini-2.5-pro`) for multi-invoice legal reminders "
+            "Frontier reasoning specialist (`gemini-4-argon`) for multi-invoice legal reminders "
             "(PAY-03), external email domain mismatch security holds (PAY-05), approved "
             "wrong-amount Oracle holds (INV-11), out-of-scope custom inquiries, and the "
             "2-step HITL ServiceNow case creation workflow (Surface A & Surface B)."

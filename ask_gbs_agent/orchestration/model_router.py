@@ -1,4 +1,4 @@
-"""Strategic Flash vs. Pro Complexity Model Router (Rubric 3.2).
+"""Strategic Flash vs. Gemini 4 Argon Complexity Model Router (Rubric 3.2).
 
 Dynamically classifies incoming user requests and routes:
 - Routine single-invoice lookups, missing-slot clarification, utility exemptions,
@@ -6,7 +6,7 @@ Dynamically classifies incoming user requests and routes:
 - Complex multi-invoice legal hold / account freeze statements (`PAY-03`), external
   email domain mismatches & `DNU` vendor fraud checks (`PAY-05`), approved wrong-amount
   Oracle payment holds (`INV-11`), and multi-step out-of-scope escalations to
-  **`gemini-2.5-pro`** for deep policy reasoning.
+  **`gemini-4-argon`** (Gemini 4 Argon) for deep policy reasoning.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class ModelRoutingDecision:
 
 
 class StrategicModelRouter:
-    """Routes user queries between `gemini-2.5-flash` and `gemini-2.5-pro`."""
+    """Routes user queries between `gemini-2.5-flash` and `gemini-4-argon`."""
 
     def __init__(
         self,
@@ -76,7 +76,7 @@ class StrategicModelRouter:
             if matched_pro_trigger or len(distinct_tokens) >= 2:
                 reason = (
                     f"High-complexity policy/security/multi-invoice trigger detected "
-                    f"('{matched_pro_trigger or 'multi-invoice statement'}'); routing to Pro."
+                    f"('{matched_pro_trigger or 'multi-invoice statement'}'); routing to Gemini 4 Argon."
                 )
                 decision = ModelRoutingDecision(
                     selected_model=self.pro_model,

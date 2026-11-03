@@ -152,7 +152,7 @@ resource "google_cloud_run_v2_service" "ask_gbs_service" {
       }
       env {
         name  = "GEMINI_PRO_MODEL"
-        value = "gemini-2.5-pro"
+        value = "gemini-4-argon"
       }
       env {
         name  = "ENABLE_SECRET_MANAGER"

@@ -129,20 +129,20 @@ async def test_rubric_category_3_multi_agent_routing_and_policy_guardrails() -> 
     assert any(isinstance(sa, SequentialAgent) for sa in esc_agent.sub_agents)
     assert len(adk_app.plugins) == 2
 
-    # 3.2 Strategic Model Routing (Flash vs Pro)
-    router = StrategicModelRouter(flash_model="gemini-2.5-flash", pro_model="gemini-2.5-pro")
+    # 3.2 Strategic Model Routing (Flash vs Gemini 4 Argon)
+    router = StrategicModelRouter(flash_model="gemini-2.5-flash", pro_model="gemini-4-argon")
     fast_decision = router.route_query("Check payment date for INV00026056")
     assert fast_decision.selected_model == "gemini-2.5-flash"
 
     pro_legal = router.route_query(
         "Second Payment Reminder Notice from BioData Registry Online for 23469, 23104, and 23288"
     )
-    assert pro_legal.selected_model == "gemini-2.5-pro"
+    assert pro_legal.selected_model == "gemini-4-argon"
 
     pro_sec = router.route_query(
         "devin.buck@veritaslabs-group.example.com asking about returned payment 3001948880"
     )
-    assert pro_sec.selected_model == "gemini-2.5-pro"
+    assert pro_sec.selected_model == "gemini-4-argon"
 
     # 3.3 Read-only ERP mutation guardrail plugin
     guardrail = GbsPolicyGuardrailPlugin()

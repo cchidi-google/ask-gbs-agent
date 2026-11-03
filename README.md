@@ -34,10 +34,10 @@ flowchart LR
     subgraph Runtime["GCP Project: aecom-demo-uc1 (Cloud Run / Vertex AI Agent Engine)"]
         FastAPI["FastAPI + ADK Runner (main.py)\n/run, /run_sse, /list-apps, /health, /warm"]
         Plugins["ADK Plugins & Lifecycle Callbacks\n• A2uiCanvasPlugin (<a2a_datapart_json>)\n• GbsPolicyGuardrailPlugin (Confidence < 80 Mask)\n• before_tool_callback Hard HITL Gate"]
-        Coord["Coordinator: ask_gbs_orchestrator\nStrategicModelRouter (Flash vs. Pro)"]
+        Coord["Coordinator: ask_gbs_orchestrator\n(gemini-4-argon + StrategicModelRouter)"]
         Diag["invoice_payment_diagnostic_agent\n(gemini-2.5-flash)"]
         KB["procurement_kb_advisory_agent\n(gemini-2.5-flash)"]
-        Esc["escalation_hitl_specialist_agent\n(gemini-2.5-pro + SequentialAgent)"]
+        Esc["escalation_hitl_specialist_agent\n(gemini-4-argon + SequentialAgent)"]
         Mem[("PersistentGbsMemoryService\n• SQLite + FTS5 + Cosine Vector Index\n• Async Consolidation Workers\n• OpenTelemetry + Cloud Trace + PII Scrubber")]
     end
 
@@ -70,7 +70,7 @@ flowchart LR
 | | **2.3 Persistent Session State** | `PersistentGbsMemoryService` (SQLite + FTS5 + Cosine Vector DB seeded from `gbs_source_of_truth_data.md` + `VertexAiSessionService` / `VertexAiMemoryBankService`) | `ask_gbs_agent/memory/persistent_store.py` |
 | | **2.4 Async Memory Operations** | Non-blocking `asyncio.create_task()` background consolidation (`schedule_async_memory_consolidation`, `consolidate_session_memory_async`) | `ask_gbs_agent/memory/async_worker.py`, `ask_gbs_agent/callbacks.py` |
 | **3. Orchestration & Logic (20 pts)** | **3.1 Multi-Agent Patterns** | `ask_gbs_orchestrator` Coordinator + 3 Specialist Sub-Agents + `reconciliation_to_escalation_pipeline` (`SequentialAgent`) | `ask_gbs_agent/agent.py`, `ask_gbs_agent/sub_agents/*.py` |
-| | **3.2 Strategic Model Routing** | `StrategicModelRouter` (`gemini-2.5-flash` for routine lookups/KBs; `gemini-2.5-pro` for `PAY-03` legal holds, `PAY-05` security mismatches, `INV-11` holds) | `ask_gbs_agent/orchestration/model_router.py` |
+| | **3.2 Strategic Model Routing** | `StrategicModelRouter` (`gemini-2.5-flash` for routine lookups/KBs; `gemini-4-argon` for orchestration, `PAY-03` legal holds, `PAY-05` security mismatches, `INV-11` holds) | `ask_gbs_agent/orchestration/model_router.py` |
 | | **3.3 Guardrails & Policy Plugins** | `GbsPolicyGuardrailPlugin(BasePlugin)` + `SelfEvaluationGuardrail` (`PAY-05` sets `confidence_score = 62 < 80`, masks bank digits, blocks direct ERP writes) | `ask_gbs_agent/plugins/policy_plugin.py`, `ask_gbs_agent/plugins/a2ui_canvas_plugin.py` |
 | | **3.4 Human-in-the-Loop Hooks** | `enforce_hitl_confirmation_gate` in `before_tool_callback` blocking `submit_confirmed_servicenow_case` until `state["hitl_user_confirmed"] == True` | `ask_gbs_agent/callbacks.py`, `ask_gbs_agent/tools/servicenow_tools.py` |
 | **4. Observability & Tracing (20 pts)** | **4.1 Structured JSON Logging** | `StructuredJsonLogger` (`python-json-logger` + `google-cloud-logging`) with zero `print()` statements in agent package | `ask_gbs_agent/observability/structured_logger.py` |
@@ -159,7 +159,7 @@ Or in **Google Cloud Console > Gemini Enterprise (Agent Builder)** (`project=aec
    - Renders the **Coupa & Oracle Status Tracker Card**, explaining why PDF date `2025-11-30` vs. Coupa Submission Date `2025-12-15` yields Net 30 Due Date `2026-01-14` (`KB0015901`, EFT `1664447`).
 4. **Turn 3 — Side-Panel `Canvas` Multi-Invoice Legal Hold Reconciliation (`PAY-03` -> `Surface E`)**:
    > *"We received a Second Payment Reminder Notice from BioData Registry Online for invoices 23469, 23104, and 23288 threatening an account freeze."*
-   - Routes to `gemini-2.5-pro` and opens the **Gemini Enterprise Side-Panel `Canvas`** with the 3-invoice `RichTable` (`23469` Paid EFT `1667857`, `23104` Pending Approval, `23288` Pending Receipt) and AP breakdown chart.
+   - Routes to `gemini-4-argon` (Gemini 4 Argon) and opens the **Gemini Enterprise Side-Panel `Canvas`** with the 3-invoice `RichTable` (`23469` Paid EFT `1667857`, `23104` Pending Approval, `23288` Pending Receipt) and AP breakdown chart.
 5. **Turn 4 — Illustrative 2-Step HITL ServiceNow Case Creation (`INV-11` -> `Surface A` & `Surface B`)**:
    > *"Titan Earthworks billed the wrong amount ($22,772) on approved invoice 2158."*
    - Stages the **A2UI ServiceNow Case Intake Form (`Surface A`)** -> click **Submit ServiceNow Case** -> passes the `before_tool_callback` HITL gate and renders the **Case Confirmation Receipt Card (`CS9940120`, `Surface B`)**.

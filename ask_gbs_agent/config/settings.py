@@ -48,9 +48,9 @@ class GbsAgentSettings(BaseSettings):
         description="Fast low-latency Gemini model for deterministic diagnostics and KB guidance.",
     )
     gemini_pro_model: str = Field(
-        default="gemini-2.5-pro",
+        default="gemini-4-argon",
         alias="GEMINI_PRO_MODEL",
-        description="High-reasoning Gemini model for multi-invoice legal holds and security guardrails.",
+        description="Frontier Gemini 4 Argon model for orchestration, multi-invoice legal holds, and security guardrails.",
     )
     gemini_enterprise_location: str = Field(
         default="global",

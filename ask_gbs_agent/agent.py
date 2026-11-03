@@ -46,7 +46,7 @@ def build_root_orchestrator_agent() -> LlmAgent:
 
     return LlmAgent(
         name="ask_gbs_orchestrator",
-        model=settings.gemini_flash_model,
+        model=settings.gemini_pro_model,
         description=(
             "Ask GBS — Enterprise Finance & Procurement Helpdesk Coordinator orchestrating "
             "Coupa/Oracle invoice & payment diagnostics, interactive Side-Panel A2UI Canvas "

@@ -2,7 +2,7 @@
 
 Evaluates all 31 scenarios in `eval/golden_dataset.json` across:
 1. Cross-system Coupa + Oracle accuracy (`INV-01`..`INV-17`, `PAY-01`..`PAY-05`, `ACC-01`..`CSP-01`)
-2. Strategic Model Routing (`gemini-2.5-flash` vs `gemini-2.5-pro`)
+2. Strategic Model Routing (`gemini-2.5-flash` vs `gemini-4-argon`)
 3. Self-Evaluation Security Guardrails (`PAY-05` `Confidence = 62 < 80` + bank masking)
 4. Out-of-scope guided error recovery -> 2-step HITL ServiceNow Case Creation (`CS9940120`)
 5. Optional live `google.adk.evaluation.agent_evaluator.AgentEvaluator` integration (`--live-adk`)
@@ -117,7 +117,10 @@ def run_deterministic_golden_suite(dataset_path: Path) -> dict[str, Any]:
             )
 
         if item["scenario_id"] in {"PAY-03", "PAY-05", "INV-11"}:
-            checks_ok = checks_ok and ("pro" in routing.selected_model.lower())
+            checks_ok = checks_ok and (
+                routing.complexity_tier == "COMPLEX_REASONING_ESCALATION"
+                and routing.selected_model == router.pro_model
+            )
 
         if checks_ok:
             passed += 1

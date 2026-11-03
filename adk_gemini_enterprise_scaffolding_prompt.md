@@ -56,7 +56,7 @@ Run the following **3 sequential prompts** inside the **Antigravity (AGY) Agent 
 Read `ai_gbs_uc1_helpdesk_agent_prd.md` and `gbs_source_of_truth_data.md` in the workspace root. We are building the `ask-gbs-agent` repository in the root of this workspace to score 95/95 on the AI in 5 Days AgentOps Rubric and run in Gemini Enterprise on GCP project `aecom-demo-uc1`.
 
 Execute Phase 1 of the build now:
-1. Create `requirements.txt`, `pyproject.toml`, `.env.example` (pre-configured with `GOOGLE_CLOUD_PROJECT=aecom-demo-uc1`, `GOOGLE_CLOUD_LOCATION=us-central1`, `GEMINI_FLASH_MODEL=gemini-2.5-flash`, `GEMINI_PRO_MODEL=gemini-2.5-pro`), and `.gitignore`.
+1. Create `requirements.txt`, `pyproject.toml`, `.env.example` (pre-configured with `GOOGLE_CLOUD_PROJECT=aecom-demo-uc1`, `GOOGLE_CLOUD_LOCATION=us-central1`, `GEMINI_FLASH_MODEL=gemini-2.5-flash`, `GEMINI_PRO_MODEL=gemini-4-argon`), and `.gitignore`.
 2. Copy `gbs_source_of_truth_data.md` into `ask_gbs_agent/data/gbs_source_of_truth_data.md`. Ensure zero internal/confidential names exist anywhere.
 3. Implement `ask_gbs_agent/config/settings.py` and `ask_gbs_agent/config/secret_manager.py`:
    - Rubric 5.3 (Secure Secret Management): Use `google.cloud.secretmanager.SecretManagerServiceClient` to resolve secrets from `projects/aecom-demo-uc1/secrets/{secret_id}/versions/latest` with environment variable fallback for local dev and zero hardcoded API keys.
@@ -112,7 +112,7 @@ Now execute Phase 2 of the build (Tools, A2UI v0.9 Canvas & Card Surfaces, Multi
 
 5. Implement `ask_gbs_agent/prompts.py`, `ask_gbs_agent/orchestration/model_router.py`, `ask_gbs_agent/sub_agents/`, and `ask_gbs_agent/agent.py` (Rubric 2.1, 3.1, 3.2):
    - Define `AGENT_CONSTITUTION_PROMPT` in `prompts.py`.
-   - Implement `StrategicModelRouter` in `model_router.py` routing routine lookups/KB queries to `gemini-2.5-flash` and complex multi-invoice legal holds (`PAY-03`), security mismatches (`PAY-05`), and escalations to `gemini-2.5-pro`.
+   - Implement `StrategicModelRouter` in `model_router.py` routing routine lookups/KB queries to `gemini-2.5-flash` and complex multi-invoice legal holds (`PAY-03`), security mismatches (`PAY-05`), and escalations to `gemini-4-argon`.
    - Create 3 specialist sub-agents (`invoice_payment_diagnostic_agent`, `procurement_kb_advisory_agent`, and `escalation_hitl_specialist_agent` which includes a `SequentialAgent` reconciliation-to-escalation pipeline) orchestrated by `root_agent = LlmAgent(name="ask_gbs_orchestrator", ...)` in `ask_gbs_agent/agent.py`.
 ```
 
